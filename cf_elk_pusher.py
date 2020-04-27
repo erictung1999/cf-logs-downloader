@@ -5,6 +5,9 @@ import requests, time, threading, os, json, logging, sys, argparse, logging.hand
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
+#specify version number of the program
+ver_num = "1.02"
+
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
 
@@ -86,7 +89,7 @@ def initialize_arg():
     parser.add_argument("--daily-pipeline", help="Daily ingest pipeline will be used instead of the default Weekly ingest pipeline, if specified.", action="store_true")
     parser.add_argument("--no-store", help="Instruct the program not to store a copy of raw logs on local storage.", action="store_true")
     parser.add_argument("--debug", help="Enable debugging functionality.", action="store_true")
-    parser.add_argument("-v", "--version", help="Show program version.", action="version", version="Version 1.01")
+    parser.add_argument("-v", "--version", help="Show program version.", action="version", version="Version " + ver_num)
     
     #parse the parameters supplied by the user, and check whether the parameters match the one specified above
     #if it does not match, an error message will be given to the user and the program will exit
@@ -349,25 +352,41 @@ def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_o
     r.encoding = 'utf-8'
     
     #check whether the HTTP response code returned by Elasticsearch endpoint is 200, if yes means the logs have been pushed to Elasticsearch successfully.
+    try:
+        result_json = json.loads(r.text)
+    except json.JSONDecodeError:
+        #Elasticsearch should return a JSON object no matter the request is successful or not. But if not, something weird happened.
+        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
+        return False
+    
     if r.status_code == 200:
-        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Successfully pushed " + str(number_of_logs) + " logs to Elasticsearch.")
-    else:
-        #if the HTTP response code is not 200, means something happened, and an error message will be returned to the user
-        try:
-            result_json = json.loads(r.text)
-            if "error" in result_json:
-                err_type = result_json["error"]["root_cause"][0]["type"]
-                err_msg = result_json["error"]["root_cause"][0]["reason"]
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
-            elif "errors" in result_json:
+        #NOTE: Elasticsearch will return status code 200 even if there's an error occured. We have to catch the error in JSON object
+        if "errors" in result_json:
+            if result_json["errors"] == False:     
+                logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Successfully pushed " + str(number_of_logs) + " logs to Elasticsearch.")
+            else:
                 err_type = result_json["items"][0]["index"]["error"]["type"]
                 err_msg = result_json["items"][0]["index"]["error"]["reason"]
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
-            else:
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
-        except json.JSONDecodeError:
-            #Elasticsearch should return a JSON object no matter the request is successful or not.
+                err_code = result_json["items"][0]["index"]["status"]
+                caused_by = ""
+                if "caused_by" in result_json["items"][0]["index"]["error"]
+                    caused_by = "Caused by: " + result_json["items"][0]["index"]["error"]["caused_by"]["type"] + " | " + result_json["items"][0]["index"]["error"]["caused_by"]["reason"] + ". "
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(err_code) + ". Root cause: " + err_type + " | " + err_msg + ". " + caused_by)
+        else:
             logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
+    else:
+        #if the HTTP response code is not 200, means something happened, and an error message will be returned to the user
+        if "error" in result_json:
+            err_type = result_json["error"]["root_cause"][0]["type"]
+            err_msg = result_json["error"]["root_cause"][0]["reason"]
+            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
+        elif "errors" in result_json:
+            err_type = result_json["items"][0]["index"]["error"]["type"]
+            err_msg = result_json["items"][0]["index"]["error"]["reason"]
+            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
+        else:
+            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
+        
     
 '''
 This method will handle the overall log processing tasks and it will run as a separate thread.
