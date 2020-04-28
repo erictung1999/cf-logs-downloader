@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 #import libraries needed in this program
+#'requests' library needs to be installed first
 import requests, time, threading, os, json, logging, sys, argparse, logging.handlers
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
 #specify version number of the program
-ver_num = "1.02"
+ver_num = "1.1"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -22,7 +23,7 @@ pipeline_name_prefix = "cloudflare-pipeline-"
 logfile_name_prefix = "cf_logs"
 
 #initialize the variables to empty string, so the other parts of the program can access it
-path = zone_id = access_token = username = password = sample_rate = port = ""
+path = zone_id = access_token = username = password = sample_rate = port = start_time = end_time = ""
 
 #the default value for the interval between each logpull process
 interval = 60.0
@@ -33,7 +34,8 @@ retry_attempt = 5
 #by default, 
 #raw logs will be stored on local storage
 #weekly pipeline will be used by default (unless daily pipeline is explicitly defined)
-no_store = daily_pipeline = False
+#logpush operation will be repeated unless user specifies to do one-time operation
+no_store = daily_pipeline = one_time = False
 
 '''
 Specify the fields for the logs
@@ -69,7 +71,7 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global path, zone_id, access_token, username, password, sample_rate, interval, no_store, logger, daily_pipeline, port, logfile_name_prefix
+    global path, zone_id, access_token, username, password, sample_rate, interval, no_store, logger, daily_pipeline, port, logfile_name_prefix, start_time_static, end_time_static, one_time
     
     welcome_msg = "A utility to pull logs from Cloudflare, process it and push them to Elasticsearch."
 
@@ -88,6 +90,9 @@ def initialize_arg():
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.", default="cf_logs")
     parser.add_argument("--daily-pipeline", help="Daily ingest pipeline will be used instead of the default Weekly ingest pipeline, if specified.", action="store_true")
     parser.add_argument("--no-store", help="Instruct the program not to store a copy of raw logs on local storage.", action="store_true")
+    parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
+    parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
+    parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
     parser.add_argument("--debug", help="Enable debugging functionality.", action="store_true")
     parser.add_argument("-v", "--version", help="Show program version.", action="version", version="Version " + ver_num)
     
@@ -168,6 +173,27 @@ def initialize_arg():
         logger.critical(str(datetime.now()) + " --- Invalid sample rate specified. Please specify a value between 0.01 and 1, and only two decimal places allowed.")
         sys.exit(2)
     
+    one_time = args.one_time
+    if one_time is True:
+        if args.start_time and args.end_time:
+            try:
+                start_time_static = datetime.strptime(args.start_time, "%Y-%m-%dT%H:%M:%SZ")
+                end_time_static = datetime.strptime(args.end_time, "%Y-%m-%dT%H:%M:%SZ")
+                diff_start_end = end_time_static - start_time_static
+                diff_to_now = datetime.utcnow() - end_time_static
+                if diff_start_end.total_seconds() < 1:
+                    logger.critical(str(datetime.now()) + " --- Start time must be earlier than the end time by at least 1 second. ")
+                    sys.exit(2)
+                if diff_to_now.total_seconds() < 70:
+                    logger.critical(str(datetime.now()) + " --- Please specify an end time that is 70 seconds or more earlier than the current time.")
+                    sys.exit(2)
+            except ValueError:
+                logger.critical(str(datetime.now()) + " --- Invalid date format specified. Make sure it is in ISO 8601 date format, in UTC timezone. Please refer to the example: 2020-12-31T12:34:56Z")
+                sys.exit(2)
+        else:
+            logger.critical(str(datetime.now()) + " --- No start time or end time specified for one-time operation. ")
+            sys.exit(2)
+            
     #take the port number, sample rate, interval, store logs and pipeline setting parameter given by the user and assign it to a variable
     interval = args.interval
     no_store = args.no_store
@@ -221,29 +247,31 @@ def verify_credential():
     #check the HTTP response code returned by Elasticsearch. if it is 200, means no issue. else, display an error message to the user and exit the program
     if r.status_code == 200:
         pass
-    elif r.status_code == 401:
-        #error 401 means unauthorized
-        logger.critical(str(datetime.now()) + " --- Failed to authenticate with Elasticsearch API. Please check your Elasticsearch username and password.")
-        sys.exit(2)
-    elif r.status_code == 404:
-        #error 404 means the ingest pipeline not exists
-        logger.critical(str(datetime.now()) + " --- Cloudflare " + ("daily" if daily_pipeline is True else "weekly") + " ingest pipeline is not installed in Elasticsearch. Install first before proceed.")
-        sys.exit(1)
     else:
-        #other kinds of error may occur and this block of code will handle other errors and display to the user accordingly.
-        try:
-            response = json.loads(r.text)
-            if "error" in response:
-                err_type = response["error"]["root_cause"][0]["type"]
-                err_msg = response["error"]["root_cause"][0]["reason"]
-                logger.critical(str(datetime.now()) + " --- An error occured with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
-                sys.exit(1)
-            else:
+        logger.debug(str(datetime.now()) + " --- Output from Elasticsearch API:\n" + r.text) #the raw response will be logged only if the user enables debugging
+        if r.status_code == 401:
+            #error 401 means unauthorized
+            logger.critical(str(datetime.now()) + " --- Failed to authenticate with Elasticsearch API. Please check your Elasticsearch username and password.")
+            sys.exit(2)
+        elif r.status_code == 404:
+            #error 404 means the ingest pipeline not exists
+            logger.critical(str(datetime.now()) + " --- Cloudflare " + ("daily" if daily_pipeline is True else "weekly") + " ingest pipeline is not installed in Elasticsearch. Install first before proceed.")
+            sys.exit(1)
+        else:
+            #other kinds of error may occur and this block of code will handle other errors and display to the user accordingly.
+            try:
+                response = json.loads(r.text)
+                if "error" in response:
+                    err_type = response["error"]["root_cause"][0]["type"]
+                    err_msg = response["error"]["root_cause"][0]["reason"]
+                    logger.critical(str(datetime.now()) + " --- An error occured with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
+                    sys.exit(1)
+                else:
+                    logger.critical(str(datetime.now()) + " --- Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
+                    sys.exit(1)
+            except json.JSONDecodeError:
                 logger.critical(str(datetime.now()) + " --- Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
                 sys.exit(1)
-        except json.JSONDecodeError:
-            logger.critical(str(datetime.now()) + " --- Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
-            sys.exit(1)
     
 
 '''
@@ -260,10 +288,10 @@ This method is to prepare the path of where the logfile will be stored and what 
 If the logfile already exists, we assume that the logs has been pulled from Cloudflare previously
 '''
 def prepare_path(log_start_time_rfc3389, log_end_time_rfc3389, data_folder):
-    logfile_name = logfile_name_prefix + "_" + log_start_time_rfc3389 + "~" + log_end_time_rfc3389 + ".json.gz"
+    logfile_name = logfile_name_prefix + "_" + log_start_time_rfc3389 + "~" + log_end_time_rfc3389 + ".json"
     logfile_path = data_folder / logfile_name
     
-    if os.path.exists(str(logfile_path)):
+    if os.path.exists(str(logfile_path) + ".gz"):
         return False
     else:
         return logfile_path
@@ -289,7 +317,10 @@ def check_if_exited():
 A method that is responsible for just compressing logs that is written to the local storage, in gzip format
 '''
 def compress_logs(logfile_path):
-    os.system("gzip -f " + str(logfile_path))
+    exit_code = os.system("gzip -f " + str(logfile_path))
+    logger.debug(str(datetime.now()) + " --- Gzip executed with exit code: " + str(exit_code))
+    
+    return True if exit_code == 0 else False
 
 '''
 This method is responsible to write logs to local storage after the logs have been pulled from Cloudflare API.
@@ -306,9 +337,10 @@ def write_logs(log_start_time_rfc3389,  log_end_time_rfc3389, logfile_path, data
 
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs saved as " + str(logfile_path))
 
-    compress_logs(logfile_path)
-
-    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs compressed in gzip format: " + str(logfile_path) + ".gz")
+    if compress_logs(logfile_path):
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs compressed in gzip format: " + str(logfile_path) + ".gz")
+    else:
+        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": An error occured while compressing " + str(logfile_path) + ".gz")
     
 '''
 This method is to insert a specific line of metadata before each lines of logs, which is required by the Elasticsearch bulk tasks.
@@ -359,6 +391,7 @@ def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_o
         logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
         return False
     
+    logger.debug(str(datetime.now()) + " --- Output from Elasticsearch API:\n" + r.text) #the raw response will be logged only if the user enables debugging
     if r.status_code == 200:
         #NOTE: Elasticsearch will return status code 200 even if there's an error occured. We have to catch the error in JSON object
         if "errors" in result_json:
@@ -369,7 +402,7 @@ def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_o
                 err_msg = result_json["items"][0]["index"]["error"]["reason"]
                 err_code = result_json["items"][0]["index"]["status"]
                 caused_by = ""
-                if "caused_by" in result_json["items"][0]["index"]["error"]
+                if "caused_by" in result_json["items"][0]["index"]["error"]:
                     caused_by = "Caused by: " + result_json["items"][0]["index"]["error"]["caused_by"]["type"] + " | " + result_json["items"][0]["index"]["error"]["caused_by"]["reason"] + ". "
                 logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(err_code) + ". Root cause: " + err_type + " | " + err_msg + ". " + caused_by)
         else:
@@ -402,9 +435,13 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     #a variable to check whether the request to Cloudflare API is successful.
     request_success = False
     
-    #get the current date and hour, these will be used to initialize the folder to store the logs
-    today_date = str(current_time.date())
-    current_hour = str(current_time.hour) + "00"
+    #if the user instructs the program to do logpush for only one time, the logs will not be stored in folder that follows the naming convention: date and time
+    if one_time is True:
+        pass
+    else:
+        #get the current date and hour, these will be used to initialize the folder to store the logs
+        today_date = str(current_time.date())
+        current_hour = str(current_time.hour) + "00"
     
     #get the log start time and log end time in RFC3389 format, so Cloudflare API will understand it and pull the appropriate logs for us
     log_start_time_rfc3389 = log_start_time_utc.isoformat() + 'Z'
@@ -414,7 +451,8 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     if no_store is False:
         
         #initialize the folder with the path specified below
-        path_with_date = path + "/" + today_date + "/" + current_hour
+        #if the user instructs the program to do logpush for only one time, it will be stored in another folder instead of the naming convention of the folder: date and time
+        path_with_date = path + (("/" + today_date + "/" + current_hour) if one_time is False else "/one_time")
         data_folder = initialize_folder(path_with_date)
 
         #prepare the full path (incl. file name) to store the logs
@@ -447,29 +485,30 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
             break
         else:
             #if HTTP response code is not 200, means something happened
+            logger.debug(str(datetime.now()) + " --- Output from Cloudflare API:\n" + r.text) #the raw response will be logged only if the user enables debugging
             try:
                 #load the JSON object to better access the content of it
                 response = json.loads(r.text)
             except:
                 #something weird happened if the response is not a JSON object, thus print out the error dump
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + retry_attempt + "...") if i < (retry_attempt-1) else ""))
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt-1) else ""))
                 time.sleep(3)
                 continue
 
             #to check whether "success" key exists in JSON object, if yes, check whether the value is False, and print out the error message
             if "success" in response:
                 if response["success"] is False:
-                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + (("Retrying " + str(i+1) + " of " + retry_attempt + "...") if i < (retry_attempt-1) else ""))
+                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt-1) else ""))
                     time.sleep(3)
                     continue
                 else:
                     #something weird happened if it is not False. If the request has been successfully done, it should not return this kind of error, instead the raw logs should be returned with HTTP response code 200.
-                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + retry_attempt + "...") if i < (retry_attempt-1) else ""))
+                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt-1) else ""))
                     time.sleep(3)
                     continue
             else:
                 #other type of error may occur, which may not return a JSON object.
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + retry_attempt + "...") if i < (retry_attempt-1) else ""))
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt-1) else ""))
                 time.sleep(3)
                 continue
             
@@ -520,43 +559,46 @@ verify_credential()
 #if both Zone ID and Access Token are valid, the logpush tasks to Elastic will begin.
 logger.info(str(datetime.now()) + " --- Cloudflare log push tasks to Elastic started.")
 
+#if the user instructs the program to do logpush for only one time, the program will not do the logpush jobs repeatedly
+if one_time is True:
+    threading.Thread(target=logs, args=(None, start_time_static, end_time_static)).start()
+else:
+    #first get the current system time, both local and UTC time.
+    #the purpose of getting UTC time is to facilitate the calculation of the start and end time to pull the logs from Cloudflare API
+    #the purpose of getting local time is to generate a directory structure to store logs, separated by the date and time
+    current_time_utc = datetime.utcnow()
+    current_time = datetime.now()
 
-#first get the current system time, both local and UTC time.
-#the purpose of getting UTC time is to facilitate the calculation of the start and end time to pull the logs from Cloudflare API
-#the purpose of getting local time is to generate a directory structure to store logs, separated by the date and time
-current_time_utc = datetime.utcnow()
-current_time = datetime.now()
+    #calculate how many seconds to go back from current time to pull the logs. 
+    logs_from = 60.0 + ((interval // 60 * 60) + 60)
 
-#calculate how many seconds to go back from current time to pull the logs. 
-logs_from = 60.0 + ((interval // 60 * 60) + 60)
+    #calculate the start time to pull the logs from Cloudflare API
+    log_start_time_utc = current_time_utc.replace(second=0, microsecond=0) - timedelta(seconds=logs_from)
+    current_time = current_time.replace(second=0, microsecond=0) - timedelta(seconds=logs_from)
 
-#calculate the start time to pull the logs from Cloudflare API
-log_start_time_utc = current_time_utc.replace(second=0, microsecond=0) - timedelta(seconds=logs_from)
-current_time = current_time.replace(second=0, microsecond=0) - timedelta(seconds=logs_from)
+    #this is useful when we need to repeat the execution of a code block after a certain interval, in an accurate way
+    #below code will explain the usage of this in detail
+    initial_time = time.time()
 
-#this is useful when we need to repeat the execution of a code block after a certain interval, in an accurate way
-#below code will explain the usage of this in detail
-initial_time = time.time()
+    #force the program to run indefinitely, unless the user stops it with Ctrl+C
+    while True:
 
-#force the program to run indefinitely, unless the user stops it with Ctrl+C
-while True:
-    
-    #calculate the end time to pull the logs from Cloudflare API, based on the interval value given by the user
-    log_end_time_utc = log_start_time_utc + timedelta(seconds=interval)
+        #calculate the end time to pull the logs from Cloudflare API, based on the interval value given by the user
+        log_end_time_utc = log_start_time_utc + timedelta(seconds=interval)
 
-    #create a new thread to handle the logs processing. the target method is logs() and 3 parameters are supplied to this method
-    threading.Thread(target=logs, args=(current_time, log_start_time_utc, log_end_time_utc)).start()
+        #create a new thread to handle the logs processing. the target method is logs() and 3 parameters are supplied to this method
+        threading.Thread(target=logs, args=(current_time, log_start_time_utc, log_end_time_utc)).start()
 
-    log_start_time_utc = log_end_time_utc
-    current_time = current_time + timedelta(seconds=interval)
+        log_start_time_utc = log_end_time_utc
+        current_time = current_time + timedelta(seconds=interval)
 
-    try:
-        time.sleep(interval - ((time.time() - initial_time) % interval))
-    except KeyboardInterrupt:
-        is_exit = True
-        print("")
-        logger.info(str(datetime.now()) + " --- Initiating program exit. Finishing up log push tasks...")
-        if num_of_running_thread <= 0:
-            logger.info(str(datetime.now()) + " --- Program exited gracefully.")
-        break
+        try:
+            time.sleep(interval - ((time.time() - initial_time) % interval))
+        except KeyboardInterrupt:
+            is_exit = True
+            print("")
+            logger.info(str(datetime.now()) + " --- Initiating program exit. Finishing up log push tasks...")
+            if num_of_running_thread <= 0:
+                logger.info(str(datetime.now()) + " --- Program exited gracefully.")
+            break
         
