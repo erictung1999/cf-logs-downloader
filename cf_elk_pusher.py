@@ -7,7 +7,7 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 
 #specify version number of the program
-ver_num = "1.1"
+ver_num = "1.2"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -341,17 +341,17 @@ def write_logs(log_start_time_rfc3389,  log_end_time_rfc3389, logfile_path, data
         logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs compressed in gzip format: " + str(logfile_path) + ".gz")
     else:
         logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": An error occured while compressing " + str(logfile_path) + ".gz")
-    
+
 '''
 This method is to insert a specific line of metadata before each lines of logs, which is required by the Elasticsearch bulk tasks.
 It will count the number of lines of logs, and return the final processing result with the number of logs back to the caller
 '''
 def process_logs(response):
-    final_json = ""
+    final_json = []
     number_of_logs = 0
     
     #this metadata is required by Elasticsearch bulk tasks
-    metadata='{ "index": { "_index": "cloudflare" }}'
+    metadata='{ "index": { "_index": "cloudflare" }}\n'
     
     #feed each lines of logs from the raw logs, split them by newline character
     for line in response.split("\n"):
@@ -359,12 +359,13 @@ def process_logs(response):
             #skip empty lines
             pass
         else:
-            #first insert the metadata to the final variable, then insert the log
-            final_json = final_json + metadata + "\n"
-            final_json = final_json + line + "\n"
+            #first insert the metadata to the array list, then insert the log
+            final_json.append(metadata)
+            final_json.append(line + "\n")
             number_of_logs += 1
-    
-    return final_json, number_of_logs
+
+    #the join() method will combine all the strings inside the array into one string. this is very optimized for large numbers of string concatenation
+    return ''.join(final_json), number_of_logs
 
 '''
 This method will take the processed logs and push them to Elasticsearch, using Bulk API.
