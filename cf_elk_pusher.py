@@ -7,7 +7,7 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 
 #specify version number of the program
-ver_num = "1.2"
+ver_num = "1.21"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -380,7 +380,11 @@ def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_o
     auth_elastic = (username, password)
     
     #make a POST request to the Elasticsearch endpoint to push all the logs that is previously processed.
-    r = requests.post(url, auth=auth_elastic, headers=headers, data=final_json)
+    try:
+        r = requests.post(url, auth=auth_elastic, headers=headers, data=final_json.encode('utf-8'))
+    except Exception as e:
+        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured while pushing logs to Elasticsearch. Error dump: \n" + str(e))
+        return False
     
     r.encoding = 'utf-8'
     
