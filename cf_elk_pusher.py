@@ -5,9 +5,10 @@
 import requests, time, threading, os, json, logging, sys, argparse, logging.handlers
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "1.21"
+ver_num = "1.23"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -23,13 +24,16 @@ pipeline_name_prefix = "cloudflare-pipeline-"
 logfile_name_prefix = "cf_logs"
 
 #initialize the variables to empty string, so the other parts of the program can access it
-path = zone_id = access_token = username = password = sample_rate = port = start_time = end_time = ""
+path = zone_id = access_token = username = password = sample_rate = port = start_time = end_time = http_proto = ""
 
 #the default value for the interval between each logpull process
 interval = 60.0
 
 #specify the number of attempts to retry in the event of error
 retry_attempt = 5
+
+#disable unverified HTTPS request warning in when using Requests library
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 #by default, 
 #raw logs will be stored on local storage
@@ -71,7 +75,7 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global path, zone_id, access_token, username, password, sample_rate, interval, no_store, logger, daily_pipeline, port, logfile_name_prefix, start_time_static, end_time_static, one_time
+    global path, zone_id, access_token, username, password, sample_rate, interval, no_store, logger, daily_pipeline, port, logfile_name_prefix, start_time_static, end_time_static, one_time, http_proto
     
     welcome_msg = "A utility to pull logs from Cloudflare, process it and push them to Elasticsearch."
 
@@ -86,6 +90,7 @@ def initialize_arg():
     parser.add_argument("-P", "--port", help="Specify the port that is listening by Elasticsearch. Default is port 9200.", default="9200")
     parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1.", default="1")
     parser.add_argument("-i", "--interval", help="Specify the interval between each logpull in seconds. Default is 60 seconds.", default=60.0, type=float)
+    parser.add_argument("--https", help="Enables the use of HTTPS for connection to Elasticsearch.", action="store_true")
     parser.add_argument("--path", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/", default="/var/log/cf_logs/")
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.", default="cf_logs")
     parser.add_argument("--daily-pipeline", help="Daily ingest pipeline will be used instead of the default Weekly ingest pipeline, if specified.", action="store_true")
@@ -195,6 +200,7 @@ def initialize_arg():
             sys.exit(2)
             
     #take the port number, sample rate, interval, store logs and pipeline setting parameter given by the user and assign it to a variable
+    http_proto = "https" if args.https else "http"
     interval = args.interval
     no_store = args.no_store
     daily_pipeline = args.daily_pipeline
@@ -231,16 +237,21 @@ def verify_credential():
         pass
     
     #specify the Elasticsearch API URL to check the username and password. it also checks whether the ingest pipeline exists in the Elasticsearch
-    url = "http://localhost:" + port + "/_ingest/pipeline/" + pipeline_name_prefix + ("daily" if daily_pipeline is True else "weekly")
+    url = http_proto + "://localhost:" + port + "/_ingest/pipeline/" + pipeline_name_prefix + ("daily" if daily_pipeline is True else "weekly")
     auth_elastic = (username, password)
     
     #make a HTTP request to the Elasticsearch API
     try:
-        r = requests.get(url, auth=auth_elastic)
-    except requests.exceptions.ConnectionError:
-        #in the event that the Elasticsearch server is unable to connect, an error message will display to the user and the program will exit
-        logger.critical(str(datetime.now()) + " --- Connection refused by Elasticsearch server. Please check whether the port number is correct, and the server is up and running.")
-        sys.exit(2)
+        r = requests.get(url, auth=auth_elastic, verify=False)
+    except requests.exceptions.ConnectionError as e:
+        if "RemoteDisconnected" in str(e):
+            #If Elasticsearch cluster disconnect the connection, display an error to the user and the program will exit. It may caused by HTTP connection to HTTPS-enabled Elasticsearch cluster
+            logger.critical(str(datetime.now()) + " --- Connection closed by remote Elasticsearch server." + ("" if http_proto == "https" else " It may due to performing HTTP request to HTTPS-enabled Elasticsearch server. Try using --https option and try again."))
+            sys.exit(2)
+        else:
+            #in the event that the Elasticsearch server is unable to connect, an error message will display to the user and the program will exit
+            logger.critical(str(datetime.now()) + " --- Connection refused by Elasticsearch server. Please check whether the port number is correct, and the server is up and running.")
+            sys.exit(2)
         
     r.encoding = 'utf-8'
     
@@ -375,16 +386,15 @@ def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_o
     global logger
     
     #specify the URL of the Elasticsearch endpoint, and specify the ingest pipeline to be used
-    url = "http://localhost:" + port + "/_bulk?pipeline=" + pipeline_name_prefix + ("daily" if daily_pipeline is True else "weekly")
+    url = http_proto + "://localhost:" + port + "/_bulk?pipeline=" + pipeline_name_prefix + ("daily" if daily_pipeline is True else "weekly")
     headers = {"Content-Type": "application/json"}
     auth_elastic = (username, password)
     
     #make a POST request to the Elasticsearch endpoint to push all the logs that is previously processed.
     try:
-        r = requests.post(url, auth=auth_elastic, headers=headers, data=final_json.encode('utf-8'))
+        r = requests.post(url, auth=auth_elastic, headers=headers, data=final_json, verify=False)
     except Exception as e:
         logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured while pushing logs to Elasticsearch. Error dump: \n" + str(e))
-        return False
     
     r.encoding = 'utf-8'
     
