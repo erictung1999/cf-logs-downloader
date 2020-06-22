@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "1.24"
+ver_num = "1.25"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -39,7 +39,7 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 #raw logs will be stored on local storage
 #weekly pipeline will be used by default (unless daily pipeline is explicitly defined)
 #logpush operation will be repeated unless user specifies to do one-time operation
-no_store = daily_pipeline = one_time = False
+no_store = store_only = daily_pipeline = one_time = no_organize = False
 
 '''
 Specify the fields for the logs
@@ -75,7 +75,7 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global path, zone_id, access_token, username, password, sample_rate, interval, no_store, logger, daily_pipeline, port, logfile_name_prefix, start_time_static, end_time_static, one_time, http_proto
+    global path, zone_id, access_token, username, password, sample_rate, interval, no_store, logger, daily_pipeline, port, logfile_name_prefix, start_time_static, end_time_static, one_time, http_proto, store_only, no_organize
     
     welcome_msg = "A utility to pull logs from Cloudflare, process it and push them to Elasticsearch."
 
@@ -95,6 +95,8 @@ def initialize_arg():
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.", default="cf_logs")
     parser.add_argument("--daily-pipeline", help="Daily ingest pipeline will be used instead of the default Weekly ingest pipeline, if specified.", action="store_true")
     parser.add_argument("--no-store", help="Instruct the program not to store a copy of raw logs on local storage.", action="store_true")
+    parser.add_argument("--store-only", help="Instruct the program to only store raw logs on local storage. Logs will not push to Elasticsearch.", action="store_true")
+    parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
@@ -199,12 +201,19 @@ def initialize_arg():
             logger.critical(str(datetime.now()) + " --- No start time or end time specified for one-time operation. ")
             sys.exit(2)
             
-    #take the port number, sample rate, interval, store logs and pipeline setting parameter given by the user and assign it to a variable
+    no_store = args.no_store
+    store_only = args.store_only
+    
+    if no_store == True and store_only == True:
+        logger.critical(str(datetime.now()) + " --- Both no-store and store-only flag must not be used at the same time. The program will exit.")
+        sys.exit(2)
+    
+    #take the protocol, interval, logfile name prefix and pipeline setting parameter given by the user and assign it to a variable
     http_proto = "https" if args.https else "http"
     interval = args.interval
-    no_store = args.no_store
     daily_pipeline = args.daily_pipeline
     logfile_name_prefix = args.prefix
+    no_organize = args.no_organize
     
     
 '''
@@ -456,7 +465,7 @@ Based on the interval setting configured by the user, this method will only hand
 '''
 def logs(current_time, log_start_time_utc, log_end_time_utc):
     
-    global path, num_of_running_thread, no_store, logger, retry_attempt
+    global path, num_of_running_thread, no_store, logger, retry_attempt, store_only, no_organize
     
     #add one to the variable to indicate number of running threads. useful to determine whether to exit the program gracefully
     num_of_running_thread += 1
@@ -465,7 +474,7 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     request_success = False
     
     #if the user instructs the program to do logpush for only one time, the logs will not be stored in folder that follows the naming convention: date and time
-    if one_time is True:
+    if one_time is True or no_organize is True:
         pass
     else:
         #get the current date and hour, these will be used to initialize the folder to store the logs
@@ -481,7 +490,10 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
         
         #initialize the folder with the path specified below
         #if the user instructs the program to do logpush for only one time, it will be stored in another folder instead of the naming convention of the folder: date and time
-        path_with_date = path + (("/" + today_date + "/" + current_hour) if one_time is False else "/one_time")
+        if one_time is True or no_organize is True:
+            path_with_date = path
+        else:
+            path_with_date = path + ("/" + today_date + "/" + current_hour)
         data_folder = initialize_folder(path_with_date)
 
         #prepare the full path (incl. file name) to store the logs
@@ -551,6 +563,10 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
         else:
             logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs requested. Raw logs will not be saved on local storage.")
 
+        #if the user instructs the script not to push logs to Elasticsearch, the following code will be ignored.
+        if store_only is True:
+            return check_if_exited()
+        
         logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Processing logs for Elasticsearch Bulk tasks.")
 
         #invoke process_logs method to make the logs compatible with Elasticsearch bulk tasks. 
