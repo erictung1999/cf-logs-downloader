@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "1.23"
+ver_num = "1.24"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -383,57 +383,71 @@ This method will take the processed logs and push them to Elasticsearch, using B
 '''
 def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_of_logs):
     
-    global logger
+    global logger, retry_attempt
     
     #specify the URL of the Elasticsearch endpoint, and specify the ingest pipeline to be used
     url = http_proto + "://localhost:" + port + "/_bulk?pipeline=" + pipeline_name_prefix + ("daily" if daily_pipeline is True else "weekly")
     headers = {"Content-Type": "application/json"}
     auth_elastic = (username, password)
     
-    #make a POST request to the Elasticsearch endpoint to push all the logs that is previously processed.
-    try:
-        r = requests.post(url, auth=auth_elastic, headers=headers, data=final_json, verify=False)
-    except Exception as e:
-        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured while pushing logs to Elasticsearch. Error dump: \n" + str(e))
-    
-    r.encoding = 'utf-8'
-    
-    #check whether the HTTP response code returned by Elasticsearch endpoint is 200, if yes means the logs have been pushed to Elasticsearch successfully.
-    try:
-        result_json = json.loads(r.text)
-    except json.JSONDecodeError:
-        #Elasticsearch should return a JSON object no matter the request is successful or not. But if not, something weird happened.
-        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
-        return False
-    
-    logger.debug(str(datetime.now()) + " --- Output from Elasticsearch API:\n" + r.text) #the raw response will be logged only if the user enables debugging
-    if r.status_code == 200:
-        #NOTE: Elasticsearch will return status code 200 even if there's an error occured. We have to catch the error in JSON object
-        if "errors" in result_json:
-            if result_json["errors"] == False:     
-                logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Successfully pushed " + str(number_of_logs) + " logs to Elasticsearch.")
+    #5 retries will be given for the logpush process, in case something happens
+    for i in range(retry_attempt+1):
+        #make a POST request to the Elasticsearch endpoint to push all the logs that is previously processed.
+        try:
+            r = requests.post(url, auth=auth_elastic, headers=headers, data=final_json, verify=False)
+        except Exception as e:
+            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured while pushing logs to Elasticsearch. Error dump: \n" + str(e) + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+            time.sleep(3)
+            continue
+
+        r.encoding = 'utf-8'
+
+        #check whether the HTTP response code returned by Elasticsearch endpoint is 200, if yes means the logs have been pushed to Elasticsearch successfully.
+        try:
+            result_json = json.loads(r.text)
+        except json.JSONDecodeError:
+            #Elasticsearch should return a JSON object no matter the request is successful or not. But if not, something weird happened.
+            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+            time.sleep(3)
+            continue
+
+        logger.debug(str(datetime.now()) + " --- Output from Elasticsearch API:\n" + r.text) #the raw response will be logged only if the user enables debugging
+        if r.status_code == 200:
+            #NOTE: Elasticsearch will return status code 200 even if there's an error occured. We have to catch the error in JSON object
+            if "errors" in result_json:
+                if result_json["errors"] == False:     
+                    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Successfully pushed " + str(number_of_logs) + " logs to Elasticsearch.")
+                    return True
+                else:
+                    err_type = result_json["items"][0]["index"]["error"]["type"]
+                    err_msg = result_json["items"][0]["index"]["error"]["reason"]
+                    err_code = result_json["items"][0]["index"]["status"]
+                    caused_by = ""
+                    if "caused_by" in result_json["items"][0]["index"]["error"]:
+                        caused_by = "Caused by: " + result_json["items"][0]["index"]["error"]["caused_by"]["type"] + " | " + result_json["items"][0]["index"]["error"]["caused_by"]["reason"] + ". "
+                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(err_code) + ". Root cause: " + err_type + " | " + err_msg + ". " + caused_by + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                    time.sleep(3)
+                    continue
             else:
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                time.sleep(3)
+                continue
+        else:
+            #if the HTTP response code is not 200, means something happened, and an error message will be returned to the user
+            if "error" in result_json:
+                err_type = result_json["error"]["root_cause"][0]["type"]
+                err_msg = result_json["error"]["root_cause"][0]["reason"]
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+            elif "errors" in result_json:
                 err_type = result_json["items"][0]["index"]["error"]["type"]
                 err_msg = result_json["items"][0]["index"]["error"]["reason"]
-                err_code = result_json["items"][0]["index"]["status"]
-                caused_by = ""
-                if "caused_by" in result_json["items"][0]["index"]["error"]:
-                    caused_by = "Caused by: " + result_json["items"][0]["index"]["error"]["caused_by"]["type"] + " | " + result_json["items"][0]["index"]["error"]["caused_by"]["reason"] + ". "
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(err_code) + ". Root cause: " + err_type + " | " + err_msg + ". " + caused_by)
-        else:
-            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
-    else:
-        #if the HTTP response code is not 200, means something happened, and an error message will be returned to the user
-        if "error" in result_json:
-            err_type = result_json["error"]["root_cause"][0]["type"]
-            err_msg = result_json["error"]["root_cause"][0]["reason"]
-            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
-        elif "errors" in result_json:
-            err_type = result_json["items"][0]["index"]["error"]["type"]
-            err_msg = result_json["items"][0]["index"]["error"]["reason"]
-            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
-        else:
-            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+            else:
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+            time.sleep(3)
+            continue
+                
+    return False
         
     
 '''
@@ -489,7 +503,7 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Requesting logs from Cloudflare...")
     
     #5 retries will be given for the logpull process, in case something happens
-    for i in range(retry_attempt):
+    for i in range(retry_attempt+1):
         #make a GET request to the Cloudflare API
         r = requests.get(url, headers=headers)
         r.encoding = 'utf-8'
@@ -506,24 +520,24 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
                 response = json.loads(r.text)
             except:
                 #something weird happened if the response is not a JSON object, thus print out the error dump
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt-1) else ""))
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                 time.sleep(3)
                 continue
 
             #to check whether "success" key exists in JSON object, if yes, check whether the value is False, and print out the error message
             if "success" in response:
                 if response["success"] is False:
-                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt-1) else ""))
+                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                     time.sleep(3)
                     continue
                 else:
                     #something weird happened if it is not False. If the request has been successfully done, it should not return this kind of error, instead the raw logs should be returned with HTTP response code 200.
-                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt-1) else ""))
+                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                     time.sleep(3)
                     continue
             else:
                 #other type of error may occur, which may not return a JSON object.
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt-1) else ""))
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                 time.sleep(3)
                 continue
             
