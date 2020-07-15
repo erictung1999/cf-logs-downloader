@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "1.25"
+ver_num = "1.26"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -39,7 +39,7 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 #raw logs will be stored on local storage
 #weekly pipeline will be used by default (unless daily pipeline is explicitly defined)
 #logpush operation will be repeated unless user specifies to do one-time operation
-no_store = store_only = daily_pipeline = one_time = no_organize = False
+no_store = store_only = daily_pipeline = one_time = no_organize = no_gzip = False
 
 '''
 Specify the fields for the logs
@@ -75,7 +75,7 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global path, zone_id, access_token, username, password, sample_rate, interval, no_store, logger, daily_pipeline, port, logfile_name_prefix, start_time_static, end_time_static, one_time, http_proto, store_only, no_organize
+    global path, zone_id, access_token, username, password, sample_rate, interval, no_store, logger, daily_pipeline, port, logfile_name_prefix, start_time_static, end_time_static, one_time, http_proto, store_only, no_organize, no_gzip
     
     welcome_msg = "A utility to pull logs from Cloudflare, process it and push them to Elasticsearch."
 
@@ -97,6 +97,7 @@ def initialize_arg():
     parser.add_argument("--no-store", help="Instruct the program not to store a copy of raw logs on local storage.", action="store_true")
     parser.add_argument("--store-only", help="Instruct the program to only store raw logs on local storage. Logs will not push to Elasticsearch.", action="store_true")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
+    parser.add_argument("--no-gzip", help="Do not compress the raw logs.", action="store_true")
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
@@ -214,6 +215,7 @@ def initialize_arg():
     daily_pipeline = args.daily_pipeline
     logfile_name_prefix = args.prefix
     no_organize = args.no_organize
+    no_gzip = args.no_gzip
     
     
 '''
@@ -348,19 +350,20 @@ After successfully save the logs, it will also trigger compress_logs() method to
 '''
 def write_logs(log_start_time_rfc3389,  log_end_time_rfc3389, logfile_path, data):
     
-    global logger
+    global logger, no_gzip
     
     #open the file as write mode
     logfile = open(logfile_path, mode="w", encoding="utf-8")
     logfile.write(data)
     logfile.close()
 
-    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs saved as " + str(logfile_path))
+    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs saved as " + str(logfile_path) + ". " + ("Logs will not compressed." if no_gzip is True else ""))
 
-    if compress_logs(logfile_path):
-        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs compressed in gzip format: " + str(logfile_path) + ".gz")
-    else:
-        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": An error occured while compressing " + str(logfile_path) + ".gz")
+    if no_gzip is False:
+        if compress_logs(logfile_path):
+            logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs compressed in gzip format: " + str(logfile_path) + ".gz")
+        else:
+            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": An error occured while compressing " + str(logfile_path) + ".gz")
 
 '''
 This method is to insert a specific line of metadata before each lines of logs, which is required by the Elasticsearch bulk tasks.
@@ -428,15 +431,20 @@ def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_o
                     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Successfully pushed " + str(number_of_logs) + " logs to Elasticsearch.")
                     return True
                 else:
-                    err_type = result_json["items"][0]["index"]["error"]["type"]
-                    err_msg = result_json["items"][0]["index"]["error"]["reason"]
-                    err_code = result_json["items"][0]["index"]["status"]
-                    caused_by = ""
-                    if "caused_by" in result_json["items"][0]["index"]["error"]:
-                        caused_by = "Caused by: " + result_json["items"][0]["index"]["error"]["caused_by"]["type"] + " | " + result_json["items"][0]["index"]["error"]["caused_by"]["reason"] + ". "
-                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(err_code) + ". Root cause: " + err_type + " | " + err_msg + ". " + caused_by + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
-                    time.sleep(3)
-                    continue
+                    try:
+                        err_type = result_json["items"][0]["index"]["error"]["type"]
+                        err_msg = result_json["items"][0]["index"]["error"]["reason"]
+                        err_code = result_json["items"][0]["index"]["status"]
+                        caused_by = ""
+                        if "caused_by" in result_json["items"][0]["index"]["error"]:
+                            caused_by = "Caused by: " + result_json["items"][0]["index"]["error"]["caused_by"]["type"] + " | " + result_json["items"][0]["index"]["error"]["caused_by"]["reason"] + ". "
+                        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to push logs with error code " + str(err_code) + ". Root cause: " + err_type + " | " + err_msg + ". " + caused_by + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                        time.sleep(3)
+                        continue
+                    except:
+                        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unknown error occured while pushing logs to Elasticsearch. Error dump: " + result_json + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                        time.sleep(3)
+                        continue
             else:
                 logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                 time.sleep(3)
