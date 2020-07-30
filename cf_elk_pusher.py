@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "1.29"
+ver_num = "1.30"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -243,7 +243,7 @@ If it is not valid, an error message will be given to the user and the program w
 '''
 def verify_credential():
     
-    global logger, username, password, daily_pipeline
+    global logger, username, password, daily_pipeline, store_only
     
     #specify the Cloudflare API URL to check the Zone ID and Access Token
     url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received"
@@ -265,53 +265,55 @@ def verify_credential():
         #a non-JSON object returned by Cloudflare indicates that authentication successful
         pass
     
-    #specify the Elasticsearch API URL to check the username and password. it also checks whether the ingest pipeline exists in the Elasticsearch
-    url = http_proto + "://localhost:" + port + "/_ingest/pipeline/" + pipeline_name_prefix + ("daily" if daily_pipeline is True else "weekly")
-    auth_elastic = (username, password)
-    
-    #make a HTTP request to the Elasticsearch API
-    try:
-        r = requests.get(url, auth=auth_elastic, verify=False)
-    except requests.exceptions.ConnectionError as e:
-        if "RemoteDisconnected" in str(e):
-            #If Elasticsearch cluster disconnect the connection, display an error to the user and the program will exit. It may caused by HTTP connection to HTTPS-enabled Elasticsearch cluster
-            logger.critical(str(datetime.now()) + " --- Connection closed by remote Elasticsearch server." + ("" if http_proto == "https" else " It may due to performing HTTP request to HTTPS-enabled Elasticsearch server. Try using --https option and try again."))
-            sys.exit(2)
+    #check whether the user wants to store the logs on local storage only. If yes, the below code will be ignored, as there's no need to check for Elasticsearch connectivity.
+    if store_only == False:
+        #specify the Elasticsearch API URL to check the username and password. it also checks whether the ingest pipeline exists in the Elasticsearch
+        url = http_proto + "://localhost:" + port + "/_ingest/pipeline/" + pipeline_name_prefix + ("daily" if daily_pipeline is True else "weekly")
+        auth_elastic = (username, password)
+
+        #make a HTTP request to the Elasticsearch API
+        try:
+            r = requests.get(url, auth=auth_elastic, verify=False)
+        except requests.exceptions.ConnectionError as e:
+            if "RemoteDisconnected" in str(e):
+                #If Elasticsearch cluster disconnect the connection, display an error to the user and the program will exit. It may caused by HTTP connection to HTTPS-enabled Elasticsearch cluster
+                logger.critical(str(datetime.now()) + " --- Connection closed by remote Elasticsearch server." + ("" if http_proto == "https" else " It may due to performing HTTP request to HTTPS-enabled Elasticsearch server. Try using --https option and try again."))
+                sys.exit(2)
+            else:
+                #in the event that the Elasticsearch server is unable to connect, an error message will display to the user and the program will exit
+                logger.critical(str(datetime.now()) + " --- Connection refused by Elasticsearch server. Please check whether the port number is correct, and the server is up and running.")
+                sys.exit(2)
+            
+        r.encoding = 'utf-8'
+
+        #check the HTTP response code returned by Elasticsearch. if it is 200, means no issue. else, display an error message to the user and exit the program
+        if r.status_code == 200:
+            pass
         else:
-            #in the event that the Elasticsearch server is unable to connect, an error message will display to the user and the program will exit
-            logger.critical(str(datetime.now()) + " --- Connection refused by Elasticsearch server. Please check whether the port number is correct, and the server is up and running.")
-            sys.exit(2)
-        
-    r.encoding = 'utf-8'
-    
-    #check the HTTP response code returned by Elasticsearch. if it is 200, means no issue. else, display an error message to the user and exit the program
-    if r.status_code == 200:
-        pass
-    else:
-        logger.debug(str(datetime.now()) + " --- Output from Elasticsearch API:\n" + r.text) #the raw response will be logged only if the user enables debugging
-        if r.status_code == 401:
-            #error 401 means unauthorized
-            logger.critical(str(datetime.now()) + " --- Failed to authenticate with Elasticsearch API. Please check your Elasticsearch username and password.")
-            sys.exit(2)
-        elif r.status_code == 404:
-            #error 404 means the ingest pipeline not exists
-            logger.critical(str(datetime.now()) + " --- Cloudflare " + ("daily" if daily_pipeline is True else "weekly") + " ingest pipeline is not installed in Elasticsearch. Install first before proceed.")
-            sys.exit(1)
-        else:
-            #other kinds of error may occur and this block of code will handle other errors and display to the user accordingly.
-            try:
-                response = json.loads(r.text)
-                if "error" in response:
-                    err_type = response["error"]["root_cause"][0]["type"]
-                    err_msg = response["error"]["root_cause"][0]["reason"]
-                    logger.critical(str(datetime.now()) + " --- An error occured with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
-                    sys.exit(1)
-                else:
+            logger.debug(str(datetime.now()) + " --- Output from Elasticsearch API:\n" + r.text) #the raw response will be logged only if the user enables debugging
+            if r.status_code == 401:
+                #error 401 means unauthorized
+                logger.critical(str(datetime.now()) + " --- Failed to authenticate with Elasticsearch API. Please check your Elasticsearch username and password.")
+                sys.exit(2)
+            elif r.status_code == 404:
+                #error 404 means the ingest pipeline not exists
+                logger.critical(str(datetime.now()) + " --- Cloudflare " + ("daily" if daily_pipeline is True else "weekly") + " ingest pipeline is not installed in Elasticsearch. Install first before proceed.")
+                sys.exit(1)
+            else:
+                #other kinds of error may occur and this block of code will handle other errors and display to the user accordingly.
+                try:
+                    response = json.loads(r.text)
+                    if "error" in response:
+                        err_type = response["error"]["root_cause"][0]["type"]
+                        err_msg = response["error"]["root_cause"][0]["reason"]
+                        logger.critical(str(datetime.now()) + " --- An error occured with error code " + str(r.status_code) + ". Root cause: " + err_type + " | " + err_msg)
+                        sys.exit(1)
+                    else:
+                        logger.critical(str(datetime.now()) + " --- Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
+                        sys.exit(1)
+                except json.JSONDecodeError:
                     logger.critical(str(datetime.now()) + " --- Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
                     sys.exit(1)
-            except json.JSONDecodeError:
-                logger.critical(str(datetime.now()) + " --- Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text)
-                sys.exit(1)
     
 
 '''
