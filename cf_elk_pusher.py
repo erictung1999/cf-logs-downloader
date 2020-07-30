@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "1.28"
+ver_num = "1.29"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -151,28 +151,38 @@ def initialize_arg():
     else:
         logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Access Token.")
         sys.exit(2)
-        
-    #check whether Elasticsearch username is given by the user via the parameter. If not, check the environment variable.
-    #the Elasticsearch username given via the parameter will override the Elasticsearch username inside environment variable.
-    #if no Elasticsearch username is given, an error message will be given to the user and the program will exit
-    if args.username:
-        username = args.username
-    elif os.getenv("ELASTIC_USERNAME"):
-        username = os.getenv("ELASTIC_USERNAME")
-    else:
-        logger.critical(str(datetime.now()) + " --- Please specify your Elasticsearch username.")
+    
+    no_store = args.no_store
+    store_only = args.store_only
+    
+    #both values cannot be True. If you specify store_only flag, means you want the program to store logs in local storage. There's no point to specify no_store flag again.
+    if no_store == True and store_only == True:
+        logger.critical(str(datetime.now()) + " --- Both no-store and store-only flag must not be used at the same time. The program will exit.")
         sys.exit(2)
-        
-    #check whether Elasticsearch password is given by the user via the parameter. If not, check the environment variable.
-    #the Elasticsearch password given via the parameter will override the Elasticsearch username inside environment variable.
-    #if no Elasticsearch password is given, an error message will be given to the user and the program will exit
-    if args.password:
-        password = args.password
-    elif os.getenv("ELASTIC_PASSWORD"):
-        password = os.getenv("ELASTIC_PASSWORD")
-    else:
-        logger.critical(str(datetime.now()) + " --- Please specify your Elasticsearch password.")
-        sys.exit(2)
+    
+    #check whether the user wants to store the logs on local storage only. If yes, the below code will be ignored, as there's no need to check for Elasticsearch username and password.
+    if store_only == False:
+        #check whether Elasticsearch username is given by the user via the parameter. If not, check the environment variable.
+        #the Elasticsearch username given via the parameter will override the Elasticsearch username inside environment variable.
+        #if no Elasticsearch username is given, an error message will be given to the user and the program will exit
+        if args.username:
+            username = args.username
+        elif os.getenv("ELASTIC_USERNAME"):
+            username = os.getenv("ELASTIC_USERNAME")
+        else:
+            logger.critical(str(datetime.now()) + " --- Please specify your Elasticsearch username.")
+            sys.exit(2)
+            
+        #check whether Elasticsearch password is given by the user via the parameter. If not, check the environment variable.
+        #the Elasticsearch password given via the parameter will override the Elasticsearch username inside environment variable.
+        #if no Elasticsearch password is given, an error message will be given to the user and the program will exit
+        if args.password:
+            password = args.password
+        elif os.getenv("ELASTIC_PASSWORD"):
+            password = os.getenv("ELASTIC_PASSWORD")
+        else:
+            logger.critical(str(datetime.now()) + " --- Please specify your Elasticsearch password.")
+            sys.exit(2)
     
     #check whether the port number is a valid port number, if not return an error message and exit
     if int(args.port) <= 65535 and int(args.port) >= 1:
@@ -216,13 +226,6 @@ def initialize_arg():
         else:
             logger.critical(str(datetime.now()) + " --- No start time or end time specified for one-time operation. ")
             sys.exit(2)
-            
-    no_store = args.no_store
-    store_only = args.store_only
-    
-    if no_store == True and store_only == True:
-        logger.critical(str(datetime.now()) + " --- Both no-store and store-only flag must not be used at the same time. The program will exit.")
-        sys.exit(2)
     
     #take the protocol, interval, logfile name prefix and pipeline setting parameter given by the user and assign it to a variable
     http_proto = "https" if args.https else "http"
