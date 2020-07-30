@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "1.26"
+ver_num = "1.27"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -48,25 +48,40 @@ The following fields are available: CacheCacheStatus,CacheResponseBytes,CacheRes
 '''
 fields = "CacheCacheStatus,CacheResponseBytes,CacheResponseStatus,CacheTieredFill,ClientASN,ClientCountry,ClientDeviceType,ClientIP,ClientIPClass,ClientRequestBytes,ClientRequestHost,ClientRequestMethod,ClientRequestPath,ClientRequestProtocol,ClientRequestReferer,ClientRequestURI,ClientRequestUserAgent,ClientSSLCipher,ClientSSLProtocol,ClientSrcPort,ClientXRequestedWith,EdgeColoCode,EdgeColoID,EdgeEndTimestamp,EdgePathingOp,EdgePathingSrc,EdgePathingStatus,EdgeRateLimitAction,EdgeRateLimitID,EdgeRequestHost,EdgeResponseBytes,EdgeResponseCompressionRatio,EdgeResponseContentType,EdgeResponseStatus,EdgeServerIP,EdgeStartTimestamp,FirewallMatchesActions,FirewallMatchesRuleIDs,FirewallMatchesSources,OriginIP,OriginResponseBytes,OriginResponseHTTPExpires,OriginResponseHTTPLastModified,OriginResponseStatus,OriginResponseTime,OriginSSLProtocol,ParentRayID,RayID,SecurityLevel,WAFAction,WAFFlags,WAFMatchedVar,WAFProfile,WAFRuleID,WAFRuleMessage,WorkerCPUTime,WorkerStatus,WorkerSubrequest,WorkerSubrequestCount,ZoneID"
 
-#create a logging object for logging purposes
-logger = logging.getLogger()
+#create three logging object for logging purposes
+logger = logging.getLogger() #for general logging
+succ_logger = logging.getLogger("succ_logger") #to log successful attempts
+fail_logger = logging.getLogger("fail_logger") #to log failed attempts
 
 #the default logging level is INFO, which is one level higher than DEBUG
 logger.setLevel(logging.INFO)
-#create a handler to write logs to local storage, and automatically rotate them on a hourly basis. maximum backup count is 120
+succ_logger.setLevel(logging.INFO)
+fail_logger.setLevel(logging.INFO)
+
+#create handlers to write logs to local storage, and automatically rotate them
 Path("/var/log/cf_elk_push/").mkdir(parents=True, exist_ok=True)
-handler_file = logging.handlers.TimedRotatingFileHandler("/var/log/cf_elk_push/push.log", when='H', interval=1, backupCount=120, utc=False, encoding="utf-8")
+handler_file = logging.handlers.TimedRotatingFileHandler("/var/log/cf_elk_push/push.log", when='H', interval=1, backupCount=120, utc=False, encoding="utf-8") #rotate hourly, store up to 120 hours
+succ_handler_file = logging.handlers.TimedRotatingFileHandler("/var/log/cf_elk_push/succ.log", when='D', interval=1, backupCount=30, utc=False, encoding="utf-8") #rotate daily, store up to 30 days
+fail_handler_file = logging.handlers.TimedRotatingFileHandler("/var/log/cf_elk_push/fail.log", when='D', interval=1, backupCount=30, utc=False, encoding="utf-8") #rotate daily, store up to 30 days
+
 #create a handler to print logs on terminal
 handler_console = logging.StreamHandler()
 
 #define the format of the logs for any logging event occurs
-formatter = logging.Formatter("[%(levelname)s] %(message)s")
-#set the log format for both handlers
+formatter = logging.Formatter("[%(levelname)s] %(message)s") #print log level with message
+succfail_formatter = logging.Formatter("%(message)s") #print message only
+
+#set the log format for all the handlers
 handler_file.setFormatter(formatter)
 handler_console.setFormatter(formatter)
-#finally, add both handlers to the logger
+succ_handler_file.setFormatter(succfail_formatter)
+fail_handler_file.setFormatter(succfail_formatter)
+
+#finally, add all handlers to their respective loggers
 logger.addHandler(handler_file)
 logger.addHandler(handler_console)
+succ_logger.addHandler(succ_handler_file)
+fail_logger.addHandler(fail_handler_file)
 
 '''
 This is the starting point of the program. It will initialize the parameters supplied by the user and save it in a variable.
@@ -313,7 +328,7 @@ def prepare_path(log_start_time_rfc3389, log_end_time_rfc3389, data_folder):
     logfile_name = logfile_name_prefix + "_" + log_start_time_rfc3389 + "~" + log_end_time_rfc3389 + ".json"
     logfile_path = data_folder / logfile_name
     
-    if os.path.exists(str(logfile_path) + ".gz"):
+    if os.path.exists(str(logfile_path) + ".gz") or os.path.exists(str(logfile_path) + ".json"):
         return False
     else:
         return logfile_path
@@ -350,20 +365,15 @@ After successfully save the logs, it will also trigger compress_logs() method to
 '''
 def write_logs(log_start_time_rfc3389,  log_end_time_rfc3389, logfile_path, data):
     
-    global logger, no_gzip
-    
     #open the file as write mode
-    logfile = open(logfile_path, mode="w", encoding="utf-8")
-    logfile.write(data)
-    logfile.close()
-
-    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs saved as " + str(logfile_path) + ". " + ("Logs will not compressed." if no_gzip is True else ""))
-
-    if no_gzip is False:
-        if compress_logs(logfile_path):
-            logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs compressed in gzip format: " + str(logfile_path) + ".gz")
-        else:
-            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": An error occured while compressing " + str(logfile_path) + ".gz")
+    try:
+        logfile = open(logfile_path, mode="w", encoding="utf-8")
+        logfile.write(data)
+        logfile.close()
+    except:
+        return False
+    
+    return True
 
 '''
 This method is to insert a specific line of metadata before each lines of logs, which is required by the Elasticsearch bulk tasks.
@@ -395,7 +405,7 @@ This method will take the processed logs and push them to Elasticsearch, using B
 '''
 def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_of_logs):
     
-    global logger, retry_attempt
+    global retry_attempt
     
     #specify the URL of the Elasticsearch endpoint, and specify the ingest pipeline to be used
     url = http_proto + "://localhost:" + port + "/_bulk?pipeline=" + pipeline_name_prefix + ("daily" if daily_pipeline is True else "weekly")
@@ -429,6 +439,7 @@ def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_o
             if "errors" in result_json:
                 if result_json["errors"] == False:     
                     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Successfully pushed " + str(number_of_logs) + " logs to Elasticsearch.")
+                    succ_logger.info("Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389)
                     return True
                 else:
                     try:
@@ -463,7 +474,8 @@ def push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_o
                 logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Unexpected error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". \n" + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
             time.sleep(3)
             continue
-                
+    
+    fail_logger.error("Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + " (Push log error)")
     return False
         
     
@@ -473,7 +485,7 @@ Based on the interval setting configured by the user, this method will only hand
 '''
 def logs(current_time, log_start_time_utc, log_end_time_utc):
     
-    global path, num_of_running_thread, no_store, logger, retry_attempt, store_only, no_organize
+    global path, num_of_running_thread, no_store, logger, retry_attempt, store_only, no_organize, no_gzip
     
     #add one to the variable to indicate number of running threads. useful to determine whether to exit the program gracefully
     num_of_running_thread += 1
@@ -562,39 +574,60 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
                 continue
             
     #check whether the logpull process from Cloudflare API has been successfully completed, if yes then proceed with next steps
-    if request_success is True:
+    if request_success is False:
+        fail_logger.error("Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + " (Logpull error)")
+        return check_if_exited()
 
-        #check whether the user wants to store a copy of raw logs on the local storage. if not, skip the process and proceed with logpush process
-        if no_store is False:
-            logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs requested. Saving logs...")
-            write_logs(log_start_time_rfc3389,  log_end_time_rfc3389, logfile_path, r.text)
+    #check whether the user wants to store a copy of raw logs on the local storage. if not, skip the process and proceed with logpush process
+    if no_store is False:
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs requested. Saving logs...")
+        if write_logs(log_start_time_rfc3389,  log_end_time_rfc3389, logfile_path, r.text):
+            #successful of write logs
+            logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs saved as " + str(logfile_path) + ". " + ("Logs will not compressed." if no_gzip is True else ""))
         else:
-            logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs requested. Raw logs will not be saved on local storage.")
+            #unsuccessful of write logs
+            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Failed to save logs to local storage.")
+            fail_logger.error("Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + " (Write log error)")
+            return check_if_exited()
 
-        #if the user instructs the script not to push logs to Elasticsearch, the following code will be ignored.
+        if no_gzip is False:
+            if compress_logs(logfile_path):
+                #successful of compress logs
+                logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs compressed in gzip format: " + str(logfile_path) + ".gz")
+            else:
+                #unsuccessful of compress logs
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": An error occured while compressing " + str(logfile_path) + ".gz")
+                fail_logger.error("Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + " (Compress log error)")
+                return check_if_exited()
+
+        #if the user instructs the script not to push logs to Elasticsearch, this function will return check_if_exited() function.
         if store_only is True:
+            succ_logger.info("Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389)
             return check_if_exited()
+    else:
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Logs requested. Raw logs will not be saved on local storage.")
+
+    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Processing logs for Elasticsearch Bulk tasks.")
+
+    #invoke process_logs method to make the logs compatible with Elasticsearch bulk tasks. 
+    #this method will return the final result with the number of logs processed
+    final_json, number_of_logs = process_logs(r.text)
+    
+    #check whether the number of logs processed is less than or equal to zero. if yes means that the logpush process is no longer required, thus skip the process
+    if number_of_logs <= 0:
         
-        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Processing logs for Elasticsearch Bulk tasks.")
-
-        #invoke process_logs method to make the logs compatible with Elasticsearch bulk tasks. 
-        #this method will return the final result with the number of logs processed
-        final_json, number_of_logs = process_logs(r.text)
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": 0 logs requested from this log range. No further action required.")
+        succ_logger.info("Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389)
         
-        #check whether the number of logs processed is less than or equal to zero. if yes means that the logpush process is no longer required, thus skip the process
-        if number_of_logs <= 0:
-            
-            logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": 0 logs requested from this log range. No further action required.")
-            
-            #invoke this method to check whether the user triggers program exit sequence, and ends the thread
-            return check_if_exited()
+        #invoke this method to check whether the user triggers program exit sequence, and ends the thread
+        return check_if_exited()
 
-        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": " + str(number_of_logs) + " logs processed.")
+    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": " + str(number_of_logs) + " logs processed.")
 
-        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Pushing " + str(number_of_logs) + " logs to Elasticsearch...")
+    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3389 + " to " + log_end_time_rfc3389 + ": Pushing " + str(number_of_logs) + " logs to Elasticsearch...")
 
-        #finally, push logs to Elasticsearch
-        push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_of_logs)
+    #finally, push logs to Elasticsearch
+    push_logs(final_json, log_start_time_rfc3389, log_end_time_rfc3389, number_of_logs)
 
     #invoke this method to check whether the user triggers program exit sequence
     return check_if_exited()
