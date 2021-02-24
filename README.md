@@ -1,2 +1,2 @@
-# cf-elk-pusher
-A little tool to pull HTTP logs from Cloudflare and push them to Elasticsearch.
+# cf-logs-downloader
+A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage.
