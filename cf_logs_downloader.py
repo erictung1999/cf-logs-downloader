@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "2.00"
+ver_num = "2.0.1"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -231,8 +231,8 @@ def initialize_folder(path_with_date):
 This method is to prepare the path of where the logfile will be stored and what will be the name of the logfile.
 If the logfile already exists, we assume that the logs has been pulled from Cloudflare previously
 '''
-def prepare_path(log_start_time_rfc3339, log_end_time_rfc3339, data_folder):
-    logfile_name = logfile_name_prefix + "_" + log_start_time_rfc3339 + "~" + log_end_time_rfc3339 + ".json"
+def prepare_path(log_start_time_rfc3339, log_end_time_rfc3339, data_folder, no_gzip):
+    logfile_name = logfile_name_prefix + "_" + log_start_time_rfc3339 + "~" + log_end_time_rfc3339 + (".json" if no_gzip is True else ".json.gz")
     logfile_path = data_folder / logfile_name
     
     if os.path.exists(str(logfile_path) + ".gz") or os.path.exists(str(logfile_path) + ".json"):
@@ -258,24 +258,19 @@ def check_if_exited():
     return False
 
 '''
-A method that is responsible for just compressing logs that is written to the local storage, in gzip format
-'''
-def compress_logs(logfile_path):
-    exit_code = os.system("gzip -f " + str(logfile_path))
-    logger.debug(str(datetime.now()) + " --- Gzip executed with exit code: " + str(exit_code))
-    
-    return True if exit_code == 0 else False
-
-'''
 This method is responsible to write logs to local storage after the logs have been pulled from Cloudflare API.
 After successfully save the logs, it will also trigger compress_logs() method to compress the newly written logs.
 '''
-def write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, logfile_path, data):
-    
-    #open the file as write mode
+def write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, logfile_path, data, no_gzip):
     try:
-        logfile = open(logfile_path, mode="w", encoding="utf-8")
-        logfile.write(data)
+        if no_gzip is True:
+            #open the file as write mode if user specifies not to compress the logs. Save the logs from decoded text response.
+            logfile = open(logfile_path, mode="w", encoding="utf-8")
+            logfile.write(data.text)
+        else:
+            #open the file as write binary mode to save the logs from raw gzipped response.
+            logfile = open(logfile_path, mode="wb")
+            logfile.write(data.raw.read())
         logfile.close()
     except:
         return False
@@ -318,7 +313,7 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     data_folder = initialize_folder(path_with_date)
 
     #prepare the full path (incl. file name) to store the logs
-    logfile_path = prepare_path(log_start_time_rfc3339, log_end_time_rfc3339, data_folder)
+    logfile_path = prepare_path(log_start_time_rfc3339, log_end_time_rfc3339, data_folder, no_gzip)
 
     #check the returned value from prepare_path() method. if False, means logfile already exists and no further action required
     if logfile_path is False:
@@ -331,14 +326,18 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received?start=" + log_start_time_rfc3339 + "&end=" + log_end_time_rfc3339 + "&timestamps="+ timestamp_format +"&sample=" + sample_rate + "&fields=" + fields
 
     #specify headers for the content type and access token 
-    headers = {"Authorization": "Bearer " + access_token, "Content-Type": "application/json"}
+    if no_gzip is True:
+        headers = {"Authorization": "Bearer " + access_token, "Content-Type": "application/json"}
+    else:
+        headers = {"Authorization": "Bearer " + access_token, "Content-Type": "application/json", "Accept-Encoding": "gzip"}
+    
 
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting logs from Cloudflare...")
     
     #5 retries will be given for the logpull process, in case something happens
     for i in range(retry_attempt+1):
         #make a GET request to the Cloudflare API
-        r = requests.get(url, headers=headers)
+        r = requests.get(url, headers=headers, stream=True)
         r.encoding = 'utf-8'
         
         #check whether the HTTP response code is 200, if yes then logpull success and exit the loop
@@ -381,24 +380,14 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
 
     #Proceed to save the logs
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs requested. Saving logs...")
-    if write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, logfile_path, r.text):
+    if write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, logfile_path, r, no_gzip):
         #successful of write logs
-        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs saved as " + str(logfile_path) + ". " + ("Logs will not compressed." if no_gzip is True else ""))
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs " + ("without gzip compression" if no_gzip is True else "compressed with gzip") + " saved as " + str(logfile_path) + ". ")
     else:
         #unsuccessful of write logs
         logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to save logs to local storage.")
         fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Write log error)")
         return check_if_exited()
-
-    if no_gzip is False:
-        if compress_logs(logfile_path):
-            #successful of compress logs
-            logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs compressed in gzip format: " + str(logfile_path) + ".gz")
-        else:
-            #unsuccessful of compress logs
-            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": An error occured while compressing " + str(logfile_path) + ".gz")
-            fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Compress log error)")
-            return check_if_exited()
 
     succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339)
 
