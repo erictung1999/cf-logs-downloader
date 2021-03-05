@@ -15,6 +15,7 @@ A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log S
 1. Clone this repository to your local machine - `git clone https://github.com/erictung1999/cf-logs-downloader.git`
 2. Make "cf_logs_downloader.py" executable - `chmod +x cf_logs_downloader.py`
 3. Verify the script is working by executing `./cf_logs_downloader.py -v`. You should see this:
+
 	```
 	Version 2.0.1
 	```
@@ -80,48 +81,69 @@ Here are some environment variables that you can create while using this tool:
 
 ## Example usage
 1. At a bare minimum, you must specify Cloudflare Zone ID and Access Token while using the tool. By doing so, this tool will use default values for the below configurations:
+
 	* Log sampling rate: 100% (represented by 1 in Cloudflare API)
 	* Logpull interval: 60 seconds
 	* Logpull storage path: /var/log/cf_logs/
 	* Log filename prefix: cf_logs
 	* Enable folder organize by date and time
 	* Enable Gzip compression
+
 2. To use the default configurations, you can use this command for logpull: 
+
 	```
 	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN
 	```
+	
 	Or, if you wish to use the environment variable to specify Cloudflare Zone ID and API Token, just export the environment variable with the value assigned to it:
+
 	```
 	$ sudo su
 	# export CF_ZONE_ID=YOUR_ZONE_ID
 	# export CF_TOKEN=YOUR_API_TOKEN
 	# ./cf_logs_downloader.py
 	```
+	
 	Expected outcome: your logs will be stored in `/var/log/cf_logs/1970-01-01/1800/cf_logs_1970-01-01T18:00:00Z~1970-01-01T18:01:00Z.json.gz` initially. Subsequent logs will be stored in their respective folder based on date and time.
+
 3. To pull logs with 10% sampling rate and 10 seconds of interval:
+
 	```
 	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN -r 0.1 -i 10
 	```
+	
 	Expected outcome: your logs will be stored in `/var/log/cf_logs/1970-01-01/1800/cf_logs_1970-01-01T18:00:00Z~1970-01-01T18:00:10Z.json.gz` initially. Subsequent logs will be stored in their respective folder based on date and time.
+
 4. To instruct the tool not to save the logs in compressed (gzip) format, and store the logs in a different folder:
+
 	```
 	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN --no-gzip --path /root/Downloads/my_cloudflare_log/
 	```
+
 	Expected outcome: your logs will be stored in `/root/Downloads/my_cloudflare_log/1970-01-01/1800/cf_logs_1970-01-01T18:00:00Z~1970-01-01T18:01:00Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
+
 5. To pull the logs at 2 minutes of interval, and instruct the tool not to organize the logs in date/time folder and use a different prefix for the log filename:
+
 	```
 	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN -i 120 --no-organize --prefix my_site_log
 	```
+
 	Expected outcome: your logs will be stored in `/var/log/cf_logs/my_site_log_1970-01-01T18:00:00Z~1970-01-01T18:02:00Z.json.gz` initially. Subsequent logs will be stored in their respective folder based on date and time.
+
 6. To pull the logs for just one time (without scheduling) and without organizing the log file into date/time folder:
+
 	```
 	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN --one-time --no-organize --start-time 2021-02-02T18:00:00Z --end-time 2021-02-02T18:30:00Z
 	```
+
 	Expected outcome: your log will be stored in `/var/log/cf_logs/cf_logs_2021-02-02T18:00:00Z~2021-02-02T18:30:00Z.json.gz`.
+
 7. To pull logs with 50% sampling rate, 30 seconds of interval, store them in a different folder with different log filename prefix, without gzip compression and do not organize the logs into date/time folder:
+
 	```
 	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN -r 0.5 -i 30 --path /home/user/cf_logging/ --prefix example_com --no-gzip --no-organize
 	```
+
 	Expected outcome: your logs will be stored in `/home/user/cf_logging/example_com_1970-01-01T18:00:00Z~1970-01-01T18:00:30Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
 
 ## Notes
