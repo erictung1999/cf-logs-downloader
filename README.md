@@ -5,7 +5,7 @@ A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log S
 ## Prerequisites
 - You must have an active Cloudflare Enterprise zone in order to use Cloudflare Enterprise Log Share (ELS).
 - Make sure your Cloudflare user account has the permission to access Zone logs (particularly, Log Share Reader role). If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
-- You need to create an API Token from the Cloudflare Dashboard to allow access to logs - https://dash.cloudflare.com/profile/api-tokens
+- You need to [create an API Token from the Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) to allow access to logs.
 - Requires root access to your local machine.
 - Requires Python 3 to be installed in your local machine (tested with Python 3.69, but versions above/below 3.69 should work) - https://www.python.org/downloads/
 - Python "requests" library must be installed - install it using `pip3 install requests` command.
@@ -152,6 +152,6 @@ Here are some environment variables that you can create while using this tool:
 3. Each successful logpull activity will be written in `succ.log` file, while each failed logpull activity will be written in `fail.log`.
 4. Each logpull activity will be given 5 attempts. If the first attempt fails (due to network conditions, Cloudflare API issue, etc.), this tool will retry for another 4 times.
 5. If you specify `--one-time` parameter, you must specify `--start-time` and `--end-time` at the same time and vice versa.
-6. The `--start-date` must be no more than 7 days earlier than now.
-7. The `--end-date` must be at least 1 minute earlier than now and later than `--start-date`.
-8. The maximum range between `--start-time` and `--end-time` must be 1 hour only. Otherwise, Cloudflare API calls will fail.
+6. The `--start-date` must be no more than 7 days earlier than now (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
+7. The `--end-date` must be at least 1 minute earlier than now and later than `--start-date` (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
+8. The maximum range between `--start-time` and `--end-time` must be 1 hour only. Otherwise, Cloudflare API calls will fail (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)). 
