@@ -75,8 +75,8 @@ Here are the list of parameters that you can leverage within the tool:
 
 ## Environment variables
 Here are some environment variables that you can create while using this tool:
-1. CF_ZONE_ID - Specify the Cloudflare Zone ID. The value of CF_ZONE_ID will be overwritten by -z or --zone parameter if you specify the value using one of the parameters.
-2. CF_TOKEN - Specify the Cloudflare Access Token. The value of CF_TOKEN will be overwritten by -t or --token if you specify the value using one of the parameters.
+1. `CF_ZONE_ID` - Specify the Cloudflare Zone ID. The value of `CF_ZONE_ID` will be overwritten by `-z` or `--zone` parameter if you specify the value using one of the parameters.
+2. `CF_TOKEN` - Specify the Cloudflare Access Token. The value of `CF_TOKEN` will be overwritten by `-t` or `--token` if you specify the value using one of the parameters.
 
 
 ## Example usage
@@ -84,8 +84,8 @@ Here are some environment variables that you can create while using this tool:
 
 	* Log sampling rate: 100% (represented by 1 in Cloudflare API)
 	* Logpull interval: 60 seconds
-	* Logpull storage path: /var/log/cf_logs/
-	* Log filename prefix: cf_logs
+	* Logpull storage path: `/var/log/cf_logs/`
+	* Log filename prefix: `cf_logs`
 	* Enable folder organize by date and time
 	* Enable Gzip compression
 
