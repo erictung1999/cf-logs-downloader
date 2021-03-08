@@ -1,13 +1,15 @@
 
+
 # cf-logs-downloader
 A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage.
 
 ## Prerequisites
 - You must have an active Cloudflare Enterprise zone in order to use Cloudflare Enterprise Log Share (ELS).
+- Make sure the zone that you want to pull logs from already has Log Retention enabled - refer to [this link](https://developers.cloudflare.com/logs/logpull-api/enabling-log-retention) on how to enable it.
 - Make sure your Cloudflare user account has the permission to access Zone logs (particularly, Log Share Reader role). If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
 - You need to [create an API Token from the Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) to allow access to logs.
 - Requires root access to your local machine.
-- Requires Python 3 to be installed in your local machine (tested with Python 3.69, but versions above/below 3.69 should work) - https://www.python.org/downloads/
+- Requires Python 3 to be installed in your local machine (tested with Python 3.69, but versions above/below 3.69 should work) - [Download it from here](https://www.python.org/downloads/). 
 - Python "requests" library must be installed - install it using `pip3 install requests` command.
 - Currently only supports Linux. Windows isn't supported yet.
 
@@ -145,6 +147,9 @@ Here are some environment variables that you can create while using this tool:
 	```
 
 	Expected outcome: your logs will be stored in `/home/user/cf_logging/example_com_1970-01-01T18:00:00Z~1970-01-01T18:00:30Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
+
+## Known issues
+1. Cloudflare might block the tool from pulling the logs from certain zones (not all) with Browser Integrity Check security service.
 
 ## Notes
 1. Currently only Cloudflare API Token can be used to authenticate against Cloudflare APIs. Global API key is not supported, as this is a more insecure option.
