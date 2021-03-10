@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "2.0.2"
+ver_num = "2.0.3"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -23,7 +23,7 @@ timestamp_format = "rfc3339"
 logfile_name_prefix = "cf_logs"
 
 #initialize the variables to empty string, so the other parts of the program can access it
-path = zone_id = access_token = sample_rate = port = start_time = end_time = ""
+path = zone_id = access_token = sample_rate = port = start_time = end_time = final_fields = ""
 
 #the default value for the interval between each logpull process
 interval = 60.0
@@ -37,7 +37,7 @@ retry_attempt = 5
 #by default, 
 #raw logs will be stored on local storage
 #logpull operation will be repeated unless user specifies to do one-time operation
-one_time = no_organize = no_gzip = False
+one_time = no_organize = no_gzip = bot_management = False
 
 '''
 Specify the fields for the logs
@@ -46,7 +46,9 @@ The following fields are available: BotScore,BotScoreSrc,CacheCacheStatus,CacheR
 
 Deprecated log fields: WAFFlags,WAFMatchedVar
 '''
-fields = "BotScore,BotScoreSrc,CacheCacheStatus,CacheResponseBytes,CacheResponseStatus,CacheTieredFill,ClientASN,ClientCountry,ClientDeviceType,ClientIP,ClientIPClass,ClientRequestBytes,ClientRequestHost,ClientRequestMethod,ClientRequestPath,ClientRequestProtocol,ClientRequestReferer,ClientRequestURI,ClientRequestUserAgent,ClientSSLCipher,ClientSSLProtocol,ClientSrcPort,ClientXRequestedWith,EdgeColoCode,EdgeColoID,EdgeEndTimestamp,EdgePathingOp,EdgePathingSrc,EdgePathingStatus,EdgeRateLimitAction,EdgeRateLimitID,EdgeRequestHost,EdgeResponseBytes,EdgeResponseCompressionRatio,EdgeResponseContentType,EdgeResponseStatus,EdgeServerIP,EdgeStartTimestamp,FirewallMatchesActions,FirewallMatchesRuleIDs,FirewallMatchesSources,OriginIP,OriginResponseBytes,OriginResponseHTTPExpires,OriginResponseHTTPLastModified,OriginResponseStatus,OriginResponseTime,OriginSSLProtocol,ParentRayID,RayID,RequestHeaders,SecurityLevel,WAFAction,WAFProfile,WAFRuleID,WAFRuleMessage,WorkerCPUTime,WorkerStatus,WorkerSubrequest,WorkerSubrequestCount,ZoneID"
+general_fields = ["CacheCacheStatus","CacheResponseBytes","CacheResponseStatus","CacheTieredFill","ClientASN","ClientCountry","ClientDeviceType","ClientIP","ClientIPClass","ClientRequestBytes","ClientRequestHost","ClientRequestMethod","ClientRequestPath","ClientRequestProtocol","ClientRequestReferer","ClientRequestURI","ClientRequestUserAgent","ClientSSLCipher","ClientSSLProtocol","ClientSrcPort","ClientXRequestedWith","EdgeColoCode","EdgeColoID","EdgeEndTimestamp","EdgePathingOp","EdgePathingSrc","EdgePathingStatus","EdgeRateLimitAction","EdgeRateLimitID","EdgeRequestHost","EdgeResponseBytes","EdgeResponseCompressionRatio","EdgeResponseContentType","EdgeResponseStatus","EdgeServerIP","EdgeStartTimestamp","FirewallMatchesActions","FirewallMatchesRuleIDs","FirewallMatchesSources","OriginIP","OriginResponseBytes","OriginResponseHTTPExpires","OriginResponseHTTPLastModified","OriginResponseStatus","OriginResponseTime","OriginSSLProtocol","ParentRayID","RayID","RequestHeaders","SecurityLevel","WAFAction","WAFProfile","WAFRuleID","WAFRuleMessage","WorkerCPUTime","WorkerStatus","WorkerSubrequest","WorkerSubrequestCount","ZoneID"]
+
+bot_fields = ["BotScore","BotScoreSrc"]
 
 #create three logging object for logging purposes
 logger = logging.getLogger("general_logger") #for general logging
@@ -90,7 +92,7 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global path, zone_id, access_token, sample_rate, interval, logger, logfile_name_prefix, start_time_static, end_time_static, one_time, no_organize, no_gzip
+    global path, zone_id, access_token, sample_rate, interval, logger, logfile_name_prefix, start_time_static, end_time_static, one_time, no_organize, no_gzip, bot_management, general_fields, final_fields
     
     welcome_msg = "A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage."
 
@@ -106,6 +108,7 @@ def initialize_arg():
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.", default="cf_logs")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
     parser.add_argument("--no-gzip", help="Do not compress the raw logs.", action="store_true")
+    parser.add_argument("--bot-management", help="Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs.", action="store_true")
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
@@ -180,6 +183,10 @@ def initialize_arg():
         else:
             logger.critical(str(datetime.now()) + " --- No start time or end time specified for one-time operation. ")
             sys.exit(2)
+
+    general_fields += (bot_fields if args.bot_management is True else [])
+    general_fields.sort()
+    final_fields = ','.join(field for field in general_fields)
     
     #take the interval, logfile name prefix and pipeline setting parameter given by the user and assign it to a variable
     interval = args.interval
@@ -284,7 +291,7 @@ Based on the interval setting configured by the user, this method will only hand
 '''
 def logs(current_time, log_start_time_utc, log_end_time_utc):
     
-    global path, num_of_running_thread, logger, retry_attempt, no_organize, no_gzip
+    global path, num_of_running_thread, logger, retry_attempt, no_organize, no_gzip, final_fields
     
     #add one to the variable to indicate number of running threads. useful to determine whether to exit the program gracefully
     num_of_running_thread += 1
@@ -323,7 +330,7 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
         return check_if_exited()
     
     #specify the URL for the Cloudflare API endpoint, with parameters such as Zone ID, the start time and end time of the logs to pull, timestamp format, sample rate and the fields to be included in the logs
-    url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received?start=" + log_start_time_rfc3339 + "&end=" + log_end_time_rfc3339 + "&timestamps="+ timestamp_format +"&sample=" + sample_rate + "&fields=" + fields
+    url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received?start=" + log_start_time_rfc3339 + "&end=" + log_end_time_rfc3339 + "&timestamps="+ timestamp_format +"&sample=" + sample_rate + "&fields=" + final_fields
 
     #specify headers for the content type and access token 
     if no_gzip is True:
