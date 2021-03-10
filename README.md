@@ -1,5 +1,6 @@
 
 
+
 # cf-logs-downloader
 A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage.
 
@@ -149,7 +150,7 @@ Here are some environment variables that you can create while using this tool:
 	Expected outcome: your logs will be stored in `/home/user/cf_logging/example_com_1970-01-01T18:00:00Z~1970-01-01T18:00:30Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
 
 ## Known issues
-1. Cloudflare might block the tool from pulling the logs from certain zones (not all) with Browser Integrity Check security service.
+1. For zones without Bot Management enabled, using this tool will get Error 1010 - auth.forbidden while calling the API. Will work on this issue soon.
 
 ## Notes
 1. Currently only Cloudflare API Token can be used to authenticate against Cloudflare APIs. Global API key is not supported, as this is a more insecure option.
