@@ -1,6 +1,3 @@
-
-
-
 # cf-logs-downloader
 A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage.
 
@@ -60,6 +57,9 @@ Here are the list of parameters that you can leverage within the tool:
   --no-organize         Instruct the program to store raw logs as is, without
                         organizing them into date and time folder.
   --no-gzip             Do not compress the raw logs.
+  --bot-management      Specify this parameter if your zone has Bot Management
+                        enabled and you want to include Bot Management related
+                        fields in your logs.
   --one-time            Only pull logs from Cloudflare for one time, without
                         scheduling capability. You must specify the start time
                         and end time of the logs to be pulled from Cloudflare.
@@ -117,10 +117,10 @@ Here are some environment variables that you can create while using this tool:
 	
 	Expected outcome: your logs will be stored in `/var/log/cf_logs/1970-01-01/1800/cf_logs_1970-01-01T18:00:00Z~1970-01-01T18:00:10Z.json.gz` initially. Subsequent logs will be stored in their respective folder based on date and time.
 
-4. To instruct the tool not to save the logs in compressed (gzip) format, and store the logs in a different folder:
+4. To instruct the tool to include Bot Management fields (BotScore and BotScoreSrc), not to save the logs in compressed (gzip) format, and store the logs in a different folder:
 
 	```
-	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN --no-gzip --path /root/Downloads/my_cloudflare_log/
+	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN --bot-management --no-gzip --path /root/Downloads/my_cloudflare_log/
 	```
 
 	Expected outcome: your logs will be stored in `/root/Downloads/my_cloudflare_log/1970-01-01/1800/cf_logs_1970-01-01T18:00:00Z~1970-01-01T18:01:00Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
@@ -150,7 +150,7 @@ Here are some environment variables that you can create while using this tool:
 	Expected outcome: your logs will be stored in `/home/user/cf_logging/example_com_1970-01-01T18:00:00Z~1970-01-01T18:00:30Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
 
 ## Known issues
-1. For zones without Bot Management enabled, using this tool will get Error 1010 - auth.forbidden while calling the API. Will work on this issue soon.
+1. None
 
 ## Notes
 1. Currently only Cloudflare API Token can be used to authenticate against Cloudflare APIs. Global API key is not supported, as this is a more insecure option.
@@ -161,3 +161,4 @@ Here are some environment variables that you can create while using this tool:
 6. The `--start-date` must be no more than 7 days earlier than now (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
 7. The `--end-date` must be at least 1 minute earlier than now and later than `--start-date` (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
 8. The maximum range between `--start-time` and `--end-time` must be 1 hour only. Otherwise, Cloudflare API calls will fail (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)). 
+9. Only specify `--bot-management` if your zone has Bot Management enabled, otherwise Cloudflare API will return Error 1010 - auth.forbidden.
