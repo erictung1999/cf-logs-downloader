@@ -2,13 +2,13 @@
 
 #import libraries needed in this program
 #'requests' library needs to be installed first
-import requests, time, threading, os, json, logging, sys, argparse, logging.handlers
+import requests, time, threading, os, json, logging, sys, argparse, logging.handlers, yaml, yschema
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "2.0.3"
+ver_num = "2.1.0"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -38,6 +38,9 @@ retry_attempt = 5
 #raw logs will be stored on local storage
 #logpull operation will be repeated unless user specifies to do one-time operation
 one_time = no_organize = no_gzip = bot_management = False
+
+#specify the schema for the YAML configuration file
+yaml_schema = {'optional cf_zone_id': 'str', 'optional cf_token': 'str', 'optional rate': 'float', 'optional interval': 'int', 'optional path': 'str', 'optional prefix': 'str', 'optional no_organize': 'bool', 'optional no_gzip': 'bool', 'optional bot_management': 'bool', 'optional debug': 'bool'}
 
 '''
 Specify the fields for the logs
@@ -92,20 +95,23 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global path, zone_id, access_token, sample_rate, interval, logger, logfile_name_prefix, start_time_static, end_time_static, one_time, no_organize, no_gzip, bot_management, general_fields, final_fields
+    global path, zone_id, access_token, sample_rate, interval, logger, logfile_name_prefix, start_time_static, end_time_static, one_time, no_organize, no_gzip, bot_management, general_fields, final_fields, yaml_schema
     
     welcome_msg = "A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage."
+
+    parsed_config = {}
 
     #create an argparse object with the welcome message as the description
     parser = argparse.ArgumentParser(description=welcome_msg)
     
     #specify which arguments are available to use in this program. The usage of the arguments will be printed when the user tells the program to display help message.
+    parser.add_argument("-c", "--config", help="Specify the path to the YAML configuration file.")
     parser.add_argument("-z", "--zone", help="Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable.")
     parser.add_argument("-t", "--token", help="Specify your Cloudflare Access Token, if CF_TOKEN environment variable not set. This will override CF_TOKEN variable.")
-    parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1.", default="1")
-    parser.add_argument("-i", "--interval", help="Specify the interval between each logpull in seconds. Default is 60 seconds.", default=60.0, type=float)
-    parser.add_argument("--path", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/", default="/var/log/cf_logs/")
-    parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.", default="cf_logs")
+    parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1.", type=float)
+    parser.add_argument("-i", "--interval", help="Specify the interval between each logpull in seconds. Default is 60 seconds.", type=int)
+    parser.add_argument("--path", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/")
+    parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
     parser.add_argument("--no-gzip", help="Do not compress the raw logs.", action="store_true")
     parser.add_argument("--bot-management", help="Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs.", action="store_true")
@@ -118,51 +124,98 @@ def initialize_arg():
     #parse the parameters supplied by the user, and check whether the parameters match the one specified above
     #if it does not match, an error message will be given to the user and the program will exit
     args = parser.parse_args()
-    
+        
+    #check if user specifies the path to configuration file, if yes, attempt read settings from the configuration file
+    if args.config:
+        #check if configuration file exists. if not, display an error and exit.
+        try:
+            config_file = open(args.config, mode="r", encoding="utf-8")
+        except Exception as e:
+            logger.critical(str(datetime.now()) + " --- Error while opening " + args.config + ": " + e + ".")
+            sys.exit(2)
+
+        #if able to open the configuration file, load and parse the YAML data into Python dictionary.
+        #if unable to parse the YAML data, display an error and exit.
+        try:
+            parsed_config = yaml.safe_load(config_file)
+        except Exception as e:
+            logger.critical(str(datetime.now()) + " --- Error parsing configuration file: " + (e))
+            sys.exit(2)
+
+        #check if the configuration follows the schema. If not, display an error and exit.
+        try:
+            yschema.validate(parsed_config, yaml_schema)
+        except yschema.exceptions.ValidationError as e:
+            logger.critical(str(datetime.now()) + " --- Error in configuration file: " + str(e) + ". Please check whether the settings are correct.")
+            sys.exit(2)
+
     #enable debugging if specified by the user
-    if args.debug is True:
+    if args.debug is True or parsed_config.get("debug") is True:
         logger.setLevel(logging.DEBUG)
-    
-    #take the "path" parameter given by the user and assign it to a variable
-    path = args.path
-    
-    #check whether Zone ID is given by the user via the parameter. If not, check the environment variable.
-    #the Zone ID given via the parameter will override the Zone ID inside environment variable.
+
+    #check whether path is given by the user via the parameter. If not, check the config file.
+    #the path given via the parameter will override the path value inside config file.
+    #if no path value specified, default value will be used.
+    if args.path:
+        path = args.path
+    elif parsed_config.get("path"):
+        path = parsed_config.get("path")
+    else:
+        path = "/var/log/cf_logs/"
+
+    #check whether Zone ID is given by the user via the parameter. If not, check the config file.
+    #if not in config file, then check the environment variable.
+    #priority of reading Zone ID: arguments - config file - environment variable.
     #if no Zone ID is given, an error message will be given to the user and the program will exit
     if args.zone:
         zone_id = args.zone
+    elif parsed_config.get("cf_zone_id"):
+        zone_id = parsed_config.get("cf_zone_id")
     elif os.getenv("CF_ZONE_ID"):
         zone_id = os.getenv("CF_ZONE_ID")
     else:
         logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Zone ID.")
         sys.exit(2)
         
-    #check whether Cloudflare Access Token is given by the user via the parameter. If not, check the environment variable.
-    #the Cloudflare Access Token given via the parameter will override the Cloudflare Access Token inside environment variable.
+    #check whether Cloudflare Access Token is given by the user via the parameter. If not, check the config file.
+    #if not in config file, then check the environment variable.
+    #priority of reading Cloudflare Access Token: arguments - config file - environment variable.
     #if no Cloudflare Access Token is given, an error message will be given to the user and the program will exit
     if args.token:
         access_token = args.token
+    elif parsed_config.get("cf_token"):
+        access_token = parsed_config.get("cf_token")
     elif os.getenv("CF_TOKEN"):
         access_token = os.getenv("CF_TOKEN")
     else:
         logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Access Token.")
         sys.exit(2)
     
+    #check if user provides the sample rate value in command line as argument, if not, check the config file.
+    #if not exist in config file, use the default value.
+    #priority of reading : arguments - config file - default value (1).
+    if args.rate:
+        sample_rate = args.rate
+    elif parsed_config.get("rate"):
+        sample_rate = parsed_config.get("rate")
+    else:
+        sample_rate = 1
     #check whether the sample rate is valid, if not return an error message and exit
     try:
         #the value should not more than two decimal places
-        if len(args.rate.split(".", 1)[1]) > 2:
+        if len(str(sample_rate).split(".", 1)[1]) > 2:
             logger.critical(str(datetime.now()) + " --- Invalid sample rate specified. Please specify a value between 0.01 and 1, and only two decimal places allowed.")
             sys.exit(2)
     except IndexError:
         #sometimes the user may specify 1 as the value, so we need to handle the exception for value with no decimal places
         pass
-    if float(args.rate) <= 1.0 and float(args.rate) >= 0.01:
-        sample_rate = args.rate
+    if sample_rate <= 1.0 and sample_rate >= 0.01:
+        sample_rate = str(sample_rate)
     else:
         logger.critical(str(datetime.now()) + " --- Invalid sample rate specified. Please specify a value between 0.01 and 1, and only two decimal places allowed.")
         sys.exit(2)
     
+    #if the user wants to do one-time operation, check the correctness of the start time and end time of the logs to pull.
     one_time = args.one_time
     if one_time is True:
         if args.start_time and args.end_time:
@@ -174,27 +227,44 @@ def initialize_arg():
                 if diff_start_end.total_seconds() < 1:
                     logger.critical(str(datetime.now()) + " --- Start time must be earlier than the end time by at least 1 second. ")
                     sys.exit(2)
-                if diff_to_now.total_seconds() < 70:
-                    logger.critical(str(datetime.now()) + " --- Please specify an end time that is 70 seconds or more earlier than the current time.")
+                if diff_to_now.total_seconds() < 60:
+                    logger.critical(str(datetime.now()) + " --- Please specify an end time that is 60 seconds or more earlier than the current time.")
                     sys.exit(2)
             except ValueError:
-                logger.critical(str(datetime.now()) + " --- Invalid date format specified. Make sure it is in ISO 8601 date format, in UTC timezone. Please refer to the example: 2020-12-31T12:34:56Z")
+                logger.critical(str(datetime.now()) + " --- Invalid date format specified. Make sure it is in RFC 3339 date format, in UTC timezone. Please refer to the example: 2020-12-31T12:34:56Z")
                 sys.exit(2)
         else:
             logger.critical(str(datetime.now()) + " --- No start time or end time specified for one-time operation. ")
             sys.exit(2)
+    
+    #check if user specifies interval in the command line as parameter. If not, check the config file. Else, use the default value.
+    #priority of reading interval value: arguments - config file - default value (60).
+    if args.interval:
+        interval = args.interval
+    elif parsed_config.get("interval"):
+        interval = parsed_config.get("interval")
+    else:
+        interval = 60
 
-    general_fields += (bot_fields if args.bot_management is True else [])
+    if args.prefix:
+        logfile_name_prefix = args.prefix
+    elif parsed_config.get("prefix"):
+        logfile_name_prefix = parsed_config.get("prefix")
+    else:
+        logfile_name_prefix = "cf_logs"
+
+    #if the user specifies True either as command line arguments or inside config file, then we assume the user wants to turn on the option.
+    no_organize = True if args.no_organize is True or parsed_config.get("no_organize") is True else False
+    no_gzip = True if args.no_gzip is True or parsed_config.get("no_gzip") is True else False
+
+    #by default, we don't include Bot Management related fields for logpull - not all customers have Bot Management enabled in their zone.
+    #if the user has Bot Management enabled and would like to enable Bot Management related fields, they can specify --bot-management as parameter.
+    bot_management = True if args.bot_management is True or parsed_config.get("bot_management") is True else False
+    general_fields += (bot_fields if bot_management is True else [])
     general_fields.sort()
     final_fields = ','.join(field for field in general_fields)
-    
-    #take the interval, logfile name prefix and pipeline setting parameter given by the user and assign it to a variable
-    interval = args.interval
-    logfile_name_prefix = args.prefix
-    no_organize = args.no_organize
-    no_gzip = args.no_gzip
-    
-    
+
+
 '''
 This method will be invoked after initialize_arg().
 This method is to verify whether the Cloudflare Zone ID and Cloudflare Access Token given by the user is valid.
@@ -291,7 +361,7 @@ Based on the interval setting configured by the user, this method will only hand
 '''
 def logs(current_time, log_start_time_utc, log_end_time_utc):
     
-    global path, num_of_running_thread, logger, retry_attempt, no_organize, no_gzip, final_fields
+    global path, num_of_running_thread, logger, retry_attempt, no_organize, no_gzip, final_fields, bot_management
     
     #add one to the variable to indicate number of running threads. useful to determine whether to exit the program gracefully
     num_of_running_thread += 1
@@ -359,24 +429,26 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
                 response = json.loads(r.text)
             except:
                 #something weird happened if the response is not a JSON object, thus print out the error dump
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Unknown error occured while pulling logs with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                 time.sleep(3)
                 continue
 
             #to check whether "success" key exists in JSON object, if yes, check whether the value is False, and print out the error message
             if "success" in response:
                 if response["success"] is False:
-                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + ("Do you have Bot Management enabled in your zone?" if response["errors"][0]["code"] == 1010 and bot_management is True else ("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                    if bot_management is True:
+                        break
                     time.sleep(3)
                     continue
                 else:
                     #something weird happened if it is not False. If the request has been successfully done, it should not return this kind of error, instead the raw logs should be returned with HTTP response code 200.
-                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Unknown error occured while pulling logs with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                     time.sleep(3)
                     continue
             else:
                 #other type of error may occur, which may not return a JSON object.
-                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Unknown error occured with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Unknown error occured while pulling logs with error code " + str(r.status_code) + ". Error dump: " + r.text + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                 time.sleep(3)
                 continue
             
