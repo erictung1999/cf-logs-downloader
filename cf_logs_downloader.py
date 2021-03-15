@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "2.1.0"
+ver_num = "2.1.1"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -163,30 +163,30 @@ def initialize_arg():
     else:
         path = "/var/log/cf_logs/"
 
-    #check whether Zone ID is given by the user via the parameter. If not, check the config file.
-    #if not in config file, then check the environment variable.
-    #priority of reading Zone ID: arguments - config file - environment variable.
+    #check whether Zone ID is given by the user via the parameter. If not, check the environment variable.
+    #if not in environment variable, then check the config file.
+    #priority of reading Zone ID: arguments - environment variable - config file.
     #if no Zone ID is given, an error message will be given to the user and the program will exit
     if args.zone:
         zone_id = args.zone
-    elif parsed_config.get("cf_zone_id"):
-        zone_id = parsed_config.get("cf_zone_id")
     elif os.getenv("CF_ZONE_ID"):
         zone_id = os.getenv("CF_ZONE_ID")
+    elif parsed_config.get("cf_zone_id"):
+        zone_id = parsed_config.get("cf_zone_id")
     else:
         logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Zone ID.")
         sys.exit(2)
         
-    #check whether Cloudflare Access Token is given by the user via the parameter. If not, check the config file.
-    #if not in config file, then check the environment variable.
-    #priority of reading Cloudflare Access Token: arguments - config file - environment variable.
+    #check whether Cloudflare Access Token is given by the user via the parameter. If not, check the environment variable.
+    #if not in environment variable, then check the config file.
+    #priority of reading Cloudflare Access Token: arguments - environment variable - config file.
     #if no Cloudflare Access Token is given, an error message will be given to the user and the program will exit
     if args.token:
         access_token = args.token
-    elif parsed_config.get("cf_token"):
-        access_token = parsed_config.get("cf_token")
     elif os.getenv("CF_TOKEN"):
         access_token = os.getenv("CF_TOKEN")
+    elif parsed_config.get("cf_token"):
+        access_token = parsed_config.get("cf_token")
     else:
         logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Access Token.")
         sys.exit(2)
@@ -246,6 +246,8 @@ def initialize_arg():
     else:
         interval = 60
 
+    #check if user specifies prefix in the command line as parameter. If not, check the config file. Else, use the default value.
+    #priority of reading prefix value: arguments - config file - default value (60).
     if args.prefix:
         logfile_name_prefix = args.prefix
     elif parsed_config.get("prefix"):
