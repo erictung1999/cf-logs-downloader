@@ -1,0 +1,29 @@
+# specify your zone ID here
+cf_zone_id: your_zone_id_here
+
+# specify your access token here. If you don't have one, generate one in Cloudflare Dashboard
+cf_token: your_token_here
+
+# specify the sampling rate for the logpull operation. Acceptable values: 0.01 to 1. By default, the value is 1.
+rate: 0.5
+
+# specify the logpull interval in seconds. By default, the tool will pull logs every 60 seconds.
+interval: 30
+
+# specify the folder path to store your logs. By default, logs will be stored in /var/log/cf_logs/.
+path: ./my_cf_logs
+
+# specify the the log file name prefix. By default, the prefix would be 'cf_logs'.
+prefix: logger
+
+# specify this option to true if you want to save the logs without organizing them into date and time folder.
+no_organize: true
+
+# specify this option to true if you want to save the logs in JSON format instead of compressed gzip format.
+no_gzip: true
+
+# specify this option to true if your zone has Bot Management enabled and you would like to include Bot Management related fields in your logs.
+bot_management: true
+
+# specify this option to true for debugging purposes.
+debug: true
