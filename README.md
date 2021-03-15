@@ -1,3 +1,4 @@
+
 # cf-logs-downloader
 A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage.
 
@@ -8,16 +9,17 @@ A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log S
 - You need to [create an API Token from the Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) to allow access to logs.
 - Requires root access to your local machine.
 - Requires Python 3 to be installed in your local machine (tested with Python 3.69, but versions above/below 3.69 should work) - [Download it from here](https://www.python.org/downloads/). 
-- Python "requests" library must be installed - install it using `pip3 install requests` command.
 - Currently only supports Linux. Windows isn't supported yet.
 
 ## Getting started
 1. Clone this repository to your local machine - `git clone https://github.com/erictung1999/cf-logs-downloader.git`
-2. Make "cf_logs_downloader.py" executable - `chmod +x cf_logs_downloader.py`
-3. Verify the script is working by executing `./cf_logs_downloader.py -v`. You should see this:
+2. Change working directory (cd) to the cloned folder (cf-logs-downloader)
+3. Install all the dependencies by running `pip3 install -r requirements.txt`
+4. Make "cf_logs_downloader.py" executable - `chmod +x cf_logs_downloader.py`
+5. Verify the script is working by executing `./cf_logs_downloader.py -v`. You should see this:
 
 	```
-	Version 2.1.0
+	Version 2.1.2
 	```
 
 ## Create an API Token
@@ -37,6 +39,8 @@ Follow the instructions below to generate an API token:
 Here are the list of parameters that you can leverage within the tool:
 ```
   -h, --help            show this help message and exit
+  -c CONFIG, --config CONFIG
+                        Specify the path to the YAML configuration file.
   -z ZONE, --zone ZONE  Specify the Cloudflare Zone ID, if CF_ZONE_ID
                         environment variable not set. This will override
                         CF_ZONE_ID variable.
@@ -76,10 +80,43 @@ Here are the list of parameters that you can leverage within the tool:
   -v, --version         Show program version
 ```
 
+## Configuration file format
+This tool supports specifying the settings via YAML configuration file. Refer to the list below for the supported settings:
+1. `cf_zone_id` (string) - Specify the Cloudflare Zone ID. 
+2. `cf_token` (string) - Specify the Cloudflare Access Token.
+3. `rate` (float) - Specify log sampling rate from 0.01 to 1. Default is 1.
+4. `interval` (int) - Specify the interval between each logpull in seconds. Default is 60 seconds.
+5. `path` (string) - Specify the path to store logs. By default, it will save to /var/log/cf_logs/
+6. `prefix` (string) - Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.
+7. `no_organize` (boolean) - Instruct the program to store raw logs as is, without organizing them into date and time folder. Acceptable values: `true` or `false`.
+8. `no_gzip` (boolean) - Do not compress the raw logs. Acceptable values: `true` or `false`.
+9. `bot_management` (boolean) - Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs. Acceptable values: `true` or `false`.
+10. `debug` (boolean) -  Enable debugging functionality. Acceptable values: `true` or `false`.
+
+Here's the sample of the configuration settings:
+```
+cf_zone_id: your_zone_id_here
+cf_token: your_token_here
+rate: 0.5
+interval: 30
+path: ./my_cf_logs
+prefix: logger
+no_organize: true
+no_gzip: true
+bot_management: true
+debug: true
+```
+
 ## Environment variables
 Here are some environment variables that you can create while using this tool:
-1. `CF_ZONE_ID` - Specify the Cloudflare Zone ID. The value of `CF_ZONE_ID` will be overwritten by `-z` or `--zone` parameter if you specify the value using one of the parameters.
-2. `CF_TOKEN` - Specify the Cloudflare Access Token. The value of `CF_TOKEN` will be overwritten by `-t` or `--token` if you specify the value using one of the parameters.
+1. `CF_ZONE_ID` - Specify the Cloudflare Zone ID. 
+2. `CF_TOKEN` - Specify the Cloudflare Access Token. 
+
+## Precedence of configuration options
+Usually command line arguments will take the highest priority among the others. However, depends on the settings, some of them might have different order of precedence:
+1. For Cloudflare Zone ID and Cloudflare Access Token: command line arguments - environment variable - configuration file
+2. For sample rate, logpull interval, log path and log file name prefix: command line arguments - configuration file - default value
+3. For no organize, no gzip, bot management and debug option - the option will be turned on when the user specifies it either as command line arguments or inside the configuration file.
 
 
 ## Example usage
