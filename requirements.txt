@@ -1,0 +1,3 @@
+requests==2.18.4
+pyyaml==3.12
+yschema==1.0.2
