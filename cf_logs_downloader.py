@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "2.1.2"
+ver_num = "2.1.3"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -131,7 +131,7 @@ def initialize_arg():
         try:
             config_file = open(args.config, mode="r", encoding="utf-8")
         except Exception as e:
-            logger.critical(str(datetime.now()) + " --- Error while opening " + args.config + ": " + e + ".")
+            logger.critical(str(datetime.now()) + " --- Error while opening " + args.config + ": " + str(e) + ".")
             sys.exit(2)
 
         #if able to open the configuration file, load and parse the YAML data into Python dictionary.
@@ -139,7 +139,7 @@ def initialize_arg():
         try:
             parsed_config = yaml.safe_load(config_file)
         except Exception as e:
-            logger.critical(str(datetime.now()) + " --- Error parsing configuration file: " + (e))
+            logger.critical(str(datetime.now()) + " --- Error parsing configuration file: " + str(e))
             sys.exit(2)
 
         #check if the configuration follows the schema. If not, display an error and exit.
