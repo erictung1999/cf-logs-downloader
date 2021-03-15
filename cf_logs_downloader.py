@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "2.1.1"
+ver_num = "2.1.2"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -247,7 +247,7 @@ def initialize_arg():
         interval = 60
 
     #check if user specifies prefix in the command line as parameter. If not, check the config file. Else, use the default value.
-    #priority of reading prefix value: arguments - config file - default value (60).
+    #priority of reading prefix value: arguments - config file - default value (cf_logs).
     if args.prefix:
         logfile_name_prefix = args.prefix
     elif parsed_config.get("prefix"):
