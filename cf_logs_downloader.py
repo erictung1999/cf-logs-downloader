@@ -8,7 +8,7 @@ from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 #specify version number of the program
-ver_num = "2.1.3"
+ver_num = "2.1.4"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -141,6 +141,8 @@ def initialize_arg():
         except Exception as e:
             logger.critical(str(datetime.now()) + " --- Error parsing configuration file: " + str(e))
             sys.exit(2)
+        finally:
+            config_file.close()
 
         #check if the configuration follows the schema. If not, display an error and exit.
         try:
