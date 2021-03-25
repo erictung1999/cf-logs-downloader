@@ -2,13 +2,14 @@
 
 #import libraries needed in this program
 #'requests' library needs to be installed first
-import requests, time, threading, os, json, logging, sys, argparse, logging.handlers, yaml, yschema
+import requests, time, threading, os, json, logging, sys, argparse, logging.handlers, yaml, yschema, tempfile
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
+from shutil import copy2
 
 #specify version number of the program
-ver_num = "2.1.4"
+ver_num = "2.2.0"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -19,14 +20,20 @@ num_of_running_thread = 0
 #define the timestamp format that we supply to Cloudflare API
 timestamp_format = "rfc3339"
 
-#the prefix name of the logfile name
+#the default prefix name of the logfile name
 logfile_name_prefix = "cf_logs"
 
+#the default path to store logs
+path = "/var/log/cf_logs/"
+
+#the defaut sampling rate for the logs
+sample_rate = 1
+
 #initialize the variables to empty string, so the other parts of the program can access it
-path = zone_id = access_token = sample_rate = port = start_time = end_time = final_fields = ""
+zone_id = access_token = start_time = end_time = final_fields = ""
 
 #the default value for the interval between each logpull process
-interval = 60.0
+interval = 60
 
 #specify the number of attempts to retry in the event of error
 retry_attempt = 5
@@ -34,13 +41,13 @@ retry_attempt = 5
 #disable unverified HTTPS request warning in when using Requests library
 #requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-#by default, 
-#raw logs will be stored on local storage
-#logpull operation will be repeated unless user specifies to do one-time operation
+#set the below settings to default: False
 one_time = no_organize = no_gzip = bot_management = False
 
 #specify the schema for the YAML configuration file
-yaml_schema = {'optional cf_zone_id': 'str', 'optional cf_token': 'str', 'optional rate': 'float', 'optional interval': 'int', 'optional path': 'str', 'optional prefix': 'str', 'optional no_organize': 'bool', 'optional no_gzip': 'bool', 'optional bot_management': 'bool', 'optional debug': 'bool'}
+yaml_schema = {'optional cf_zone_id': 'str', 'optional cf_token': 'str', 'optional rate': 'float', 'optional interval': 'int', 'optional nice': 'int', 'optional path': 'one_of(types=(str, list(type=str)))', 'optional prefix': 'str', 'optional no_organize': 'bool', 'optional no_gzip': 'bool', 'optional bot_management': 'bool', 'optional debug': 'bool'}
+
+service_path = '/etc/systemd/system/cf-logs-downloader.service'
 
 '''
 Specify the fields for the logs
@@ -110,7 +117,8 @@ def initialize_arg():
     parser.add_argument("-t", "--token", help="Specify your Cloudflare Access Token, if CF_TOKEN environment variable not set. This will override CF_TOKEN variable.")
     parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1.", type=float)
     parser.add_argument("-i", "--interval", help="Specify the interval between each logpull in seconds. Default is 60 seconds.", type=int)
-    parser.add_argument("--path", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/")
+    parser.add_argument("-n", "--nice", help="Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.", type=int)
+    parser.add_argument("--path", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/. Do not use with --paths parameter.")
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
     parser.add_argument("--no-gzip", help="Do not compress the raw logs.", action="store_true")
@@ -118,12 +126,25 @@ def initialize_arg():
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
+    parser.add_argument("--install-service", help="Install the program as a systemd service. The service will execute the program from the path where you install the service.", action="store_true")
+    parser.add_argument("--uninstall-service", help="Uninstall the systemd service.", action="store_true")
     parser.add_argument("--debug", help="Enable debugging functionality.", action="store_true")
     parser.add_argument("-v", "--version", help="Show program version.", action="version", version="Version " + ver_num)
     
     #parse the parameters supplied by the user, and check whether the parameters match the one specified above
     #if it does not match, an error message will be given to the user and the program will exit
     args = parser.parse_args()
+
+    if args.install_service and args.uninstall_service:
+        logger.critical(str(datetime.now()) + " --- Hold on. Are you trying to install or uninstall service?")
+        sys.exit(2)
+
+    if args.install_service:
+        config_path = args.config if args.config else False
+        install_service(config_path)
+
+    if args.uninstall_service:
+        uninstall_service()
         
     #check if user specifies the path to configuration file, if yes, attempt read settings from the configuration file
     if args.config:
@@ -154,16 +175,6 @@ def initialize_arg():
     #enable debugging if specified by the user
     if args.debug is True or parsed_config.get("debug") is True:
         logger.setLevel(logging.DEBUG)
-
-    #check whether path is given by the user via the parameter. If not, check the config file.
-    #the path given via the parameter will override the path value inside config file.
-    #if no path value specified, default value will be used.
-    if args.path:
-        path = args.path
-    elif parsed_config.get("path"):
-        path = parsed_config.get("path")
-    else:
-        path = "/var/log/cf_logs/"
 
     #check whether Zone ID is given by the user via the parameter. If not, check the environment variable.
     #if not in environment variable, then check the config file.
@@ -200,8 +211,6 @@ def initialize_arg():
         sample_rate = args.rate
     elif parsed_config.get("rate"):
         sample_rate = parsed_config.get("rate")
-    else:
-        sample_rate = 1
     #check whether the sample rate is valid, if not return an error message and exit
     try:
         #the value should not more than two decimal places
@@ -245,8 +254,30 @@ def initialize_arg():
         interval = args.interval
     elif parsed_config.get("interval"):
         interval = parsed_config.get("interval")
+
+    #check if user specifies niceness in the command line as parameter. If not, check the config file. Else, use the default value.
+    #priority of reading interval value: arguments - config file - default value (-10).
+    #niceness value must be between -20 to 19.
+    if args.nice:
+        if args.nice < -20 :
+            logger.warning(str(datetime.now()) + " --- The value of niceness is too small. Setting the value to -20.")
+            os.nice(-20)
+        elif args.nice > 19 :
+            logger.warning(str(datetime.now()) + " --- The value of niceness is too large. Setting the value to 19.")
+            os.nice(19)
+        else:
+            os.nice(args.nice)
+    elif parsed_config.get("nice"):
+        if parsed_config.get("nice") < -20 :
+            logger.warning(str(datetime.now()) + " --- The value of niceness is too small. Setting the value to -20.")
+            os.nice(-20)
+        elif parsed_config.get("nice") > 19 :
+            logger.warning(str(datetime.now()) + " --- The value of niceness is too large. Setting the value to 19.")
+            os.nice(19)
+        else:
+            os.nice(parsed_config.get("nice"))
     else:
-        interval = 60
+        os.nice(-10)
 
     #check if user specifies prefix in the command line as parameter. If not, check the config file. Else, use the default value.
     #priority of reading prefix value: arguments - config file - default value (cf_logs).
@@ -254,8 +285,17 @@ def initialize_arg():
         logfile_name_prefix = args.prefix
     elif parsed_config.get("prefix"):
         logfile_name_prefix = parsed_config.get("prefix")
-    else:
-        logfile_name_prefix = "cf_logs"
+
+    #check if user specifies path in the command line as parameter. If not, check the config file. Else, use the default value.
+    #priority of reading path value: arguments - config file - default value (/var/log/cf_logs/).
+    if args.path:
+        path = args.path
+    elif parsed_config.get("path"):
+        path = parsed_config.get("path")
+
+    #convert the value to a list if the data type is a string
+    if isinstance(path, str):
+        path = [path]
 
     #if the user specifies True either as command line arguments or inside config file, then we assume the user wants to turn on the option.
     no_organize = True if args.no_organize is True or parsed_config.get("no_organize") is True else False
@@ -267,6 +307,69 @@ def initialize_arg():
     general_fields += (bot_fields if bot_management is True else [])
     general_fields.sort()
     final_fields = ','.join(field for field in general_fields)
+
+'''
+This method will install the tool as a systemd service.
+'''
+def install_service(config_path):
+    service_desc = '''\
+        [Unit]
+        Description=A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage.
+        After=network.target
+        StartLimitIntervalSec=0
+
+        [Service]
+        Type=simple
+        Restart=always
+        RestartSec=1
+        User=root
+        ExecStart={cwd}/cf_logs_downloader.py --config {config_file}
+
+        [Install]
+        WantedBy=multi-user.target\
+    '''.format(cwd=os.getcwd(), config_file=config_path)
+
+    try:
+        service_file = open(service_path, mode='w', encoding="utf-8")
+        service_file.write(service_desc)
+        os.system("systemctl daemon-reload")
+        if config_path:
+            logger.info(str(datetime.now()) + " --- Successfully installed service as " + service_path + ".")
+            try:
+                copy2(config_path, '/etc/cf-logs-downloader/config.yml')
+                logger.info(str(datetime.now()) + " --- Successfully copied the config file to /etc/cf-logs-downloader/config.yml.")
+            except IOError as io_err:
+                os.makedirs(os.path.dirname('/etc/cf-logs-downloader/'))
+                copy2(config_path, '/etc/cf-logs-downloader/config.yml')
+                logger.info(str(datetime.now()) + " --- Successfully copied the config file to /etc/cf-logs-downloader/config.yml.")
+        else:
+            logger.info(str(datetime.now()) + " --- Successfully installed service as " + service_path + ". Ensure that the config file is located in /etc/cf-logs-downloader/config.yml before you start the service.")
+        logger.info(str(datetime.now()) + " --- Enable the service by using this command: systemctl enable cf-logs-downloader")
+        logger.info(str(datetime.now()) + " --- Start the service by using this command: systemctl start cf-logs-downloader")
+        sys.exit(0)
+    except Exception as e:
+        logger.critical(str(datetime.now()) + " --- Error while installing service as " + service_path + ":" + str(e) + ".")
+        sys.exit(126)
+    finally:
+        service_file.close()
+
+'''
+This method will uninstall the systemd service.
+'''
+def uninstall_service():
+    if os.path.exists(service_path):
+        try:
+            os.system("systemctl disable cf-logs-downloader")
+            os.remove(service_path)
+            os.system("systemctl daemon-reload")
+            logger.info(str(datetime.now()) + " --- Successfully uninstalled the service.")
+            sys.exit(0)
+        except Exception as e:
+            logger.critical(str(datetime.now()) + " --- Error while uninstalling service:" + str(e) + ". You may remove the service manually by deleting " + service_path + ".")
+            sys.exit(126)
+    else:
+        logger.critical(str(datetime.now()) + " --- The service was not installed previously. Abort.")
+        sys.exit(126)
 
 
 '''
@@ -316,7 +419,7 @@ def prepare_path(log_start_time_rfc3339, log_end_time_rfc3339, data_folder, no_g
     logfile_name = logfile_name_prefix + "_" + log_start_time_rfc3339 + "~" + log_end_time_rfc3339 + (".json" if no_gzip is True else ".json.gz")
     logfile_path = data_folder / logfile_name
     
-    if os.path.exists(str(logfile_path) + ".gz") or os.path.exists(str(logfile_path) + ".json"):
+    if os.path.exists(str(logfile_path)) or os.path.exists(str(logfile_path)):
         return False
     else:
         return logfile_path
@@ -343,15 +446,21 @@ This method is responsible to write logs to local storage after the logs have be
 After successfully save the logs, it will also trigger compress_logs() method to compress the newly written logs.
 '''
 def write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, logfile_path, data, no_gzip):
+    dirname, basename = os.path.split(logfile_path)
     try:
         if no_gzip is True:
-            #open the file as write mode if user specifies not to compress the logs. Save the logs from decoded text response.
-            logfile = open(logfile_path, mode="w", encoding="utf-8")
+            #open the temporary file as write mode if user specifies not to compress the logs. Save the logs from decoded text response.
+            logfile = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=basename, dir=dirname)
             logfile.write(data.text)
+            #after writing logs to temporary file, create a hard link from actual file to the temporary file
+            os.link(logfile.name, logfile_path)
         else:
-            #open the file as write binary mode to save the logs from raw gzipped response.
-            logfile = open(logfile_path, mode="wb")
+            #open the temporary file as write binary mode to save the logs from raw gzipped response.
+            logfile = tempfile.NamedTemporaryFile(mode="wb", prefix=basename, dir=dirname)
             logfile.write(data.raw.read())
+            #after writing logs to temporary file, create a hard link from actual file to the temporary file
+            os.link(logfile.name, logfile_path)
+        #close the temporary file and it will automatically deleted
         logfile.close()
     except:
         return False
@@ -366,6 +475,8 @@ Based on the interval setting configured by the user, this method will only hand
 def logs(current_time, log_start_time_utc, log_end_time_utc):
     
     global path, num_of_running_thread, logger, retry_attempt, no_organize, no_gzip, final_fields, bot_management
+
+    logfile_path = []
     
     #add one to the variable to indicate number of running threads. useful to determine whether to exit the program gracefully
     num_of_running_thread += 1
@@ -384,24 +495,26 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     #get the log start time and log end time in RFC3339 format, so Cloudflare API will understand it and pull the appropriate logs for us
     log_start_time_rfc3339 = log_start_time_utc.isoformat() + 'Z'
     log_end_time_rfc3339 = log_end_time_utc.isoformat() + 'Z'
-        
+
     #initialize the folder with the path specified below
     #if the user instructs the program to do logpull for only one time, it will be stored in another folder instead of the naming convention of the folder: date and time
     if one_time is True or no_organize is True:
         path_with_date = path
     else:
-        path_with_date = path + ("/" + today_date + "/" + current_hour)
-    data_folder = initialize_folder(path_with_date)
+        path_with_date = [p + ("/" + today_date + "/" + current_hour) for p in path]
 
-    #prepare the full path (incl. file name) to store the logs
-    logfile_path = prepare_path(log_start_time_rfc3339, log_end_time_rfc3339, data_folder, no_gzip)
+    for p in path_with_date:
+        data_folder = initialize_folder(p)
 
-    #check the returned value from prepare_path() method. if False, means logfile already exists and no further action required
-    if logfile_path is False:
+        #prepare the full path (incl. file name) to store the logs
+        one_logfile_path = prepare_path(log_start_time_rfc3339, log_end_time_rfc3339, data_folder, no_gzip)
 
-        logger.warning(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logfile already exists! Skipping.")
+        #check the returned value from prepare_path() method. if False, means logfile already exists and no further action required
+        if one_logfile_path is False:
+            logger.warning(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logfile already exists! Skipping.")
+            return check_if_exited()
 
-        return check_if_exited()
+        logfile_path.append(one_logfile_path)
     
     #specify the URL for the Cloudflare API endpoint, with parameters such as Zone ID, the start time and end time of the logs to pull, timestamp format, sample rate and the fields to be included in the logs
     url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received?start=" + log_start_time_rfc3339 + "&end=" + log_end_time_rfc3339 + "&timestamps="+ timestamp_format +"&sample=" + sample_rate + "&fields=" + final_fields
@@ -412,7 +525,6 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     else:
         headers = {"Authorization": "Bearer " + access_token, "Content-Type": "application/json", "Accept-Encoding": "gzip", 'User-Agent': 'cf-logs-downloader (https://github.com/erictung1999/cf-logs-downloader)'}
     
-
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting logs from Cloudflare...")
     
     #5 retries will be given for the logpull process, in case something happens
@@ -463,14 +575,20 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
 
     #Proceed to save the logs
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs requested. Saving logs...")
-    if write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, logfile_path, r, no_gzip):
-        #successful of write logs
-        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs " + ("without gzip compression" if no_gzip is True else "compressed with gzip") + " saved as " + str(logfile_path) + ". ")
-    else:
-        #unsuccessful of write logs
-        logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to save logs to local storage.")
-        fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Write log error)")
-        return check_if_exited()
+
+    i = 0
+
+    for each_logfile_path in logfile_path:
+        i += 1
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Writing logs " + str(i) + " of " + str(len(logfile_path)) + " to " + str(each_logfile_path) + " ...")
+        if write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, each_logfile_path, r, no_gzip):
+            #successful of write logs
+            logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs " + ("without gzip compression" if no_gzip is True else "compressed with gzip") + " saved as " + str(each_logfile_path) + ". ")
+        else:
+            #unsuccessful of write logs
+            logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to save logs to local storage.")
+            fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Write log to " + str(each_logfile_path) + " error)")
+            return check_if_exited()
 
     succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339)
 
