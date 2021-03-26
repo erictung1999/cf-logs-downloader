@@ -25,5 +25,8 @@ no_gzip: true
 # specify this option to true if your zone has Bot Management enabled and you would like to include Bot Management related fields in your logs.
 bot_management: true
 
+# specify the niceness (priority) of the process from -20 to 19. Lower niceness value means higher priority.
+nice: -10
+
 # specify this option to true for debugging purposes.
 debug: true
