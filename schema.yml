@@ -1,0 +1,18 @@
+optional cf_zone_id: str
+optional cf_token: str
+optional rate: float
+optional interval: int
+optional nice: int
+optional path: str
+optional prefix: str
+optional no_organize: bool
+optional no_gzip: bool
+optional bot_management: bool
+optional debug: bool
+type log_config:
+  required name: str
+  required path: str
+  required prefix: str
+  required no_organize: bool
+  required no_gzip: bool
+optional log_dest: list(type=log_config)
