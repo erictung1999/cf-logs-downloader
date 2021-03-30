@@ -88,11 +88,11 @@ This tool supports specifying the settings via YAML configuration file. Refer to
 6. `nice` (int, optional) - Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.
 7. `debug` (boolean, optional) -  Enable debugging functionality. Acceptable values: `true` or `false`.
 8.  `log_dest` (list, optional) - Specify this to further configure the settings for the destination of the logs. This includes multiple options as shown below:
-	a. `name` (string, required) - Give a unique name of the log destination configuration. Useful to identify in activity log.
-	b. `path` (string, required) - Specify the path to store logs. By default, it will save to /var/log/cf_logs/
-	c. `prefix` (string, required) - Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.
-	d. `no_organize` (boolean, required) - Instruct the program to store raw logs as is, without organizing them into date and time folder. Acceptable values: `true` or `false`.
-	e. `no_gzip` (boolean, required) - Do not compress the raw logs. Acceptable values: `true` or `false`.
+	*  `name` (string, required) - Give a unique name of the log destination configuration. Useful to identify in activity log.
+	* `path` (string, required) - Specify the path to store logs. By default, it will save to /var/log/cf_logs/
+	* `prefix` (string, required) - Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.
+	* `no_organize` (boolean, required) - Instruct the program to store raw logs as is, without organizing them into date and time folder. Acceptable values: `true` or `false`.
+	* `no_gzip` (boolean, required) - Do not compress the raw logs. Acceptable values: `true` or `false`.
 
 You may refer to schema.yml for more information.
 
