@@ -38,28 +38,41 @@ Follow the instructions below to generate an API token:
 Here are the list of parameters that you can leverage within the tool:
 ```
   -h, --help            show this help message and exit
-  -c CONFIG, --config CONFIG
+  -c config.yml, --config config.yml
                         Specify the path to the YAML configuration file.
-  -z ZONE, --zone ZONE  Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable.
+  -z ZONE_ID, --zone ZONE_ID
+                        Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable
+                        not set. This will override CF_ZONE_ID variable.
   -t TOKEN, --token TOKEN
-                        Specify your Cloudflare Access Token, if CF_TOKEN environment variable not set. This will override CF_TOKEN variable.
+                        Specify your Cloudflare Access Token, if CF_TOKEN environment
+                        variable not set. This will override CF_TOKEN variable.
   -r RATE, --rate RATE  Specify the log sampling rate from 0.01 to 1. Default is 1.
   -i INTERVAL, --interval INTERVAL
-                        Specify the interval between each logpull in seconds. Default is 60 seconds.
-  -n NICE, --nice NICE  Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.
-  --path PATH           Specify the path to store logs. By default, it will save to /var/log/cf_logs/. Do not use with --paths parameter.
-  --prefix PREFIX       Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.
-  --no-organize         Instruct the program to store raw logs as is, without organizing them into date and time folder.
+                        Specify the interval between each logpull in seconds. Default is 60
+                        seconds.
+  -n NICE, --nice NICE  Specify the niceness of the logpull process from -20 (highest
+                        priority) to 19 (lowest priority). Default is -10.
+  --path /log/path/     Specify the path to store logs. By default, it will save to
+                        /var/log/cf_logs/.
+  --prefix PREFIX       Specify the prefix name of the logfile being stored on local storage.
+                        By default, the file name will begins with cf_logs.
+  --no-organize         Instruct the program to store raw logs as is, without organizing them
+                        into date and time folder.
   --no-gzip             Do not compress the raw logs.
-  --bot-management      Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs.
-  --one-time            Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs
+  --bot-management      Specify this parameter if your zone has Bot Management enabled and
+                        you want to include Bot Management related fields in your logs.
+  --one-time            Only pull logs from Cloudflare for one time, without scheduling
+                        capability. You must specify the start time and end time of the logs
                         to be pulled from Cloudflare.
   --start-time START_TIME
-                        Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 date
+                        Specify the start time of the logs to be pulled from Cloudflare. The
+                        start time is inclusive. You must follow the ISO 8601 (RFC 3339) date
                         format, in UTC timezone. Example: 2020-12-31T12:34:56Z
-  --end-time END_TIME   Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 date format,
-                        in UTC timezone. Example: 2020-12-31T12:35:00Z
-  --install-service     Install the program as a systemd service. The service will execute the program from the path where you install the service.
+  --end-time END_TIME   Specify the end time of the logs to be pulled from Cloudflare. The
+                        end time is exclusive. You must follow the ISO 8601 (RFC 3339) date
+                        format, in UTC timezone. Example: 2020-12-31T12:35:00Z
+  --install-service     Install the program as a systemd service. The service will execute
+                        the program from the path where you install the service.
   --uninstall-service   Uninstall the systemd service.
   --debug               Enable debugging functionality.
   -v, --version         Show program version.
@@ -67,17 +80,21 @@ Here are the list of parameters that you can leverage within the tool:
 
 ## Configuration file format
 This tool supports specifying the settings via YAML configuration file. Refer to the list below for the supported settings:
-1. `cf_zone_id` (string) - Specify the Cloudflare Zone ID. 
-2. `cf_token` (string) - Specify the Cloudflare Access Token.
-3. `rate` (float) - Specify log sampling rate from 0.01 to 1. Default is 1.
-4. `interval` (int) - Specify the interval between each logpull in seconds. Default is 60 seconds.
-5. `path` (string) - Specify the path to store logs. By default, it will save to /var/log/cf_logs/
-6. `prefix` (string) - Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.
-7. `no_organize` (boolean) - Instruct the program to store raw logs as is, without organizing them into date and time folder. Acceptable values: `true` or `false`.
-8. `no_gzip` (boolean) - Do not compress the raw logs. Acceptable values: `true` or `false`.
-9. `bot_management` (boolean) - Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs. Acceptable values: `true` or `false`.
-10. `nice` (int) - Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.
-11. `debug` (boolean) -  Enable debugging functionality. Acceptable values: `true` or `false`.
+1. `cf_zone_id` (string, optional) - Specify the Cloudflare Zone ID. 
+2. `cf_token` (string, optional) - Specify the Cloudflare Access Token.
+3. `rate` (float, optional) - Specify log sampling rate from 0.01 to 1. Default is 1.
+4. `interval` (int, optional) - Specify the interval between each logpull in seconds. Default is 60 seconds.
+5. `bot_management` (boolean, optional) - Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs. Acceptable values: `true` or `false`.
+6. `nice` (int, optional) - Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.
+7. `debug` (boolean, optional) -  Enable debugging functionality. Acceptable values: `true` or `false`.
+8.  `log_dest` (list, optional) - Specify this to further configure the settings for the destination of the logs. This includes multiple options as shown below:
+	a. `name` (string, required) - Give a unique name of the log destination configuration. Useful to identify in activity log.
+	b. `path` (string, required) - Specify the path to store logs. By default, it will save to /var/log/cf_logs/
+	c. `prefix` (string, required) - Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.
+	d. `no_organize` (boolean, required) - Instruct the program to store raw logs as is, without organizing them into date and time folder. Acceptable values: `true` or `false`.
+	e. `no_gzip` (boolean, required) - Do not compress the raw logs. Acceptable values: `true` or `false`.
+
+You may refer to schema.yml for more information.
 
 Here's the sample of the configuration settings:
 ```
@@ -85,13 +102,20 @@ cf_zone_id: your_zone_id_here
 cf_token: your_token_here
 rate: 0.5
 interval: 30
-path: ./my_cf_logs
-prefix: logger
-no_organize: true
-no_gzip: true
 bot_management: true
 nice: -10
 debug: true
+log_dest:
+  - name: first_dest
+    path: /var/log/first_path
+    prefix: number_one
+    no_organize: false
+    no_gzip: true
+  - name: second_dest
+    path: /var/log/second_path
+    prefix: number_two
+    no_organize: true
+    no_gzip: false
 ```
 
 ## Environment variables
@@ -102,8 +126,10 @@ Here are some environment variables that you can create while using this tool:
 ## Precedence of configuration options
 Usually command line arguments will take the highest priority among the others. However, depends on the settings, some of them might have different order of precedence:
 1. **For Cloudflare Zone ID and Cloudflare Access Token:** command line arguments - environment variable - configuration file
-2. **For sample rate, logpull interval, log path, log file name prefix and niceness:** command line arguments - configuration file - default value
-3. **For no organize, no gzip, bot management and debug option**: the option will be turned on when the user specifies it either as command line arguments or inside the configuration file.
+2. **For sample rate, logpull interval and niceness:** command line arguments - configuration file - default value
+3. **For bot management and debug option**: the option will be turned on when the user specifies it either as command line arguments or inside the configuration file.
+4. **For log path and log file name prefix**: specifying this option as command line arguments will override everything specified under `log_dest` inside the configuration file.
+5.  **For no organize and no gzip**: specifying this option as command line arguments will override `no_gzip` and `no_organize` option in each item under `log_dest` inside the configuration file.
 
 
 ## Example usage
@@ -117,6 +143,7 @@ Usually command line arguments will take the highest priority among the others. 
 	* Enable Gzip compression
 	* No Bot Management fields (BotScore & BotScoreSrc) included in logpull
 	* Niceness: -10
+	* No debugging
 
 2. To use the default configurations, you can use this command for logpull: 
 
