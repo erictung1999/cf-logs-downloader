@@ -2,7 +2,7 @@
 
 #import libraries needed in this program
 #'requests' library needs to be installed first
-import requests, time, threading, os, json, logging, sys, argparse, logging.handlers, yaml, yschema, tempfile
+import requests, time, threading, os, json, logging, sys, argparse, logging.handlers, yaml, yschema, tempfile, signal
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.3.1"
+ver_num = "2.3.2"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -454,9 +454,26 @@ def check_if_exited():
 
     if is_exit is True and num_of_running_thread <= 0:
         logger.info(str(datetime.now()) + " --- Program exited gracefully.")
-        return True
+        sys.exit(0)
     
     return False
+
+'''
+This method will be called if the process receives SIGINT or SIGTERM signal from the system.
+The purpose is to gracefully terminate the program. 
+This method will check if the number of running threads is 0 (means no logpull subprocess running), then it will display an info message showing that program exited gracefully.
+This method also sets the is_exit flag so that other logpull subprocess can check this flag before they exit.
+'''
+def graceful_terminate(signum, frame):
+    global is_exit, num_of_running_thread
+
+    is_exit = True
+    print("")
+    logger.info(str(datetime.now()) + " --- " + signal.Signals(signum).name + " detected. Initiating program exit. Finishing up log download tasks...")
+    if num_of_running_thread <= 0:
+        logger.info(str(datetime.now()) + " --- Program exited gracefully.")
+        
+    sys.exit(0)
 
 '''
 This method is responsible to write logs to local storage after the logs have been pulled from Cloudflare API.
@@ -633,6 +650,9 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
 ####################################################################################################       
         
         
+signal.signal(signal.SIGINT, graceful_terminate)
+signal.signal(signal.SIGTERM, graceful_terminate)
+
 #This is where the real execution of the program begins. First it will initialize the parameters supplied by the user
 initialize_arg()
 
@@ -676,13 +696,4 @@ else:
         log_start_time_utc = log_end_time_utc
         current_time = current_time + timedelta(seconds=interval)
 
-        try:
-            time.sleep(interval - ((time.time() - initial_time) % interval))
-        except KeyboardInterrupt:
-            is_exit = True
-            print("")
-            logger.info(str(datetime.now()) + " --- Initiating program exit. Finishing up log download tasks...")
-            if num_of_running_thread <= 0:
-                logger.info(str(datetime.now()) + " --- Program exited gracefully.")
-            break
-        
+        time.sleep(interval - ((time.time() - initial_time) % interval))
