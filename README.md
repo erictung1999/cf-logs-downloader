@@ -18,7 +18,7 @@ A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log S
 5. Verify the script is working by executing `./cf_logs_downloader.py -v`. You should see this:
 
 	```
-	Version 2.3.0
+	Version 2.3.1
 	```
 
 ## Create an API Token

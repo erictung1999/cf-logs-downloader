@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.3.0"
+ver_num = "2.3.1"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -105,20 +105,20 @@ def initialize_arg():
     parser = argparse.ArgumentParser(description=welcome_msg)
     
     #specify which arguments are available to use in this program. The usage of the arguments will be printed when the user tells the program to display help message.
-    parser.add_argument("-c", "--config", help="Specify the path to the YAML configuration file.")
-    parser.add_argument("-z", "--zone", help="Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable.")
+    parser.add_argument("-c", "--config", metavar="config.yml", help="Specify the path to the YAML configuration file.")
+    parser.add_argument("-z", "--zone", metavar="ZONE_ID",help="Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable.")
     parser.add_argument("-t", "--token", help="Specify your Cloudflare Access Token, if CF_TOKEN environment variable not set. This will override CF_TOKEN variable.")
     parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1.", type=float)
     parser.add_argument("-i", "--interval", help="Specify the interval between each logpull in seconds. Default is 60 seconds.", type=int)
     parser.add_argument("-n", "--nice", help="Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.", type=int)
-    parser.add_argument("--path", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/.")
+    parser.add_argument("--path", metavar="/log/path/", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/.")
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
     parser.add_argument("--no-gzip", help="Do not compress the raw logs.", action="store_true")
     parser.add_argument("--bot-management", help="Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs.", action="store_true")
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
-    parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
-    parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
+    parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
+    parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
     parser.add_argument("--install-service", help="Install the program as a systemd service. The service will execute the program from the path where you install the service.", action="store_true")
     parser.add_argument("--uninstall-service", help="Uninstall the systemd service.", action="store_true")
     parser.add_argument("--debug", help="Enable debugging functionality.", action="store_true")
@@ -280,7 +280,7 @@ def initialize_arg():
         else:
             os.nice(-10)
     except Exception as e:
-        logger.warning(str(datetime.now()) + " --- Unable to set niceness value of the logpull process: " + e + ".")
+        logger.warning(str(datetime.now()) + " --- Unable to set niceness value of the logpull process: " + str(e) + ".")
 
     #check if the user specifies log path and logfile prefix in command line arguments. If yes, override everything specified in the config file.
     if args.path or args.prefix:
@@ -313,11 +313,11 @@ def get_yaml_schema():
         yaml_schema = yaml.safe_load(yaml_schema_file)
         yaml_schema_file.close()
         return yaml_schema
-    except FileNotFoundError as e:
-        logger.critical(str(datetime.now()) + " --- Unable to parse YAML schema: schema.yml file not found. Clone the repository from Github and try again.")
+    except FileNotFoundError:
+        logger.critical(str(datetime.now()) + " --- Unable to parse YAML schema: schema.yml file not found. Clone the repository from Github, or download the release file and try again.")
         sys.exit(2)
     except Exception as e:
-        logger.critical(str(datetime.now()) + " --- Unable to parse YAML schema: " + str(e) + ". Clone the repository from Github and try again.")
+        logger.critical(str(datetime.now()) + " --- Unable to parse YAML schema: " + str(e) + ". Clone the repository from Github, or download the release file and try again.")
         sys.exit(2)        
 
 '''
