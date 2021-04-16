@@ -7,15 +7,13 @@ A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log S
 - Make sure your Cloudflare user account has the permission to access Zone logs (particularly, Log Share Reader role). If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
 - You need to [create an API Token from the Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) to allow access to logs.
 - Requires root access to your local machine.
-- Requires at least Python 3.6 to be installed in your local machine - [Download it from here](https://www.python.org/downloads/). 
 - Currently only supports Linux. Windows isn't supported yet.
 
 ## Getting started
-1. Clone this repository to your local machine - `git clone https://github.com/erictung1999/cf-logs-downloader.git`
-2. Change working directory (cd) to the cloned folder (cf-logs-downloader)
-3. Install all the dependencies by running `pip3 install -r requirements.txt`
-4. Make "cf_logs_downloader.py" executable - `chmod +x cf_logs_downloader.py`
-5. Verify the script is working by executing `./cf_logs_downloader.py -v`. You should see this:
+1. Download the latest version of the binary file from the [GitHub Releases section](https://github.com/erictung1999/cf-logs-downloader/releases).
+3. Unzip the file. You should see 3 files: `cf_logs_downloader`, `schema.yml` and `sampleconfig.yml`.
+4. Make "cf_logs_downloader" executable - `chmod +x cf_logs_downloader`.
+5. Verify the script is working by executing `./cf_logs_downloader -v`. You should see this:
 
 	```
 	Version 2.3.3
