@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.3.2"
+ver_num = "2.3.3"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -597,7 +597,7 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
             if "success" in response:
                 if response["success"] is False:
                     logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + ("Do you have Bot Management enabled in your zone?" if response["errors"][0]["code"] == 1010 and bot_management is True else ("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
-                    if bot_management is True:
+                    if response["errors"][0]["code"] == 1010 and bot_management is True:
                         break
                     time.sleep(3)
                     continue
