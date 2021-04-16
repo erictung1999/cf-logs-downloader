@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.3.3"
+ver_num = "2.3.4"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -403,8 +403,12 @@ def verify_credential():
     headers = {"Authorization": "Bearer " + access_token, "Content-Type": "application/json"}
     
     #make a HTTP request to the Cloudflare API
-    r = requests.get(url, headers=headers)
-    r.encoding = "utf-8"
+    try:
+        r = requests.get(url, headers=headers)
+        r.encoding = "utf-8"
+    except Exception as e:
+        logger.critical(str(datetime.now()) + " --- Unable to perform API request to Cloudflare: " + str(e))
+        sys.exit(2)
     
     #if there's an error, Cloudflare API will return a JSON object to indicate the error
     #and if it's not, a plain text will be returned instead
@@ -574,8 +578,13 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     #5 retries will be given for the logpull process, in case something happens
     for i in range(retry_attempt+1):
         #make a GET request to the Cloudflare API
-        r = requests.get(url, headers=headers, stream=True)
-        r.encoding = 'utf-8'
+        try:
+            r = requests.get(url, headers=headers, stream=True)
+            r.encoding = 'utf-8'
+        except Exception as e:
+            logger.critical(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Unable to perform API request to Cloudflare: " + str(e) + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+            time.sleep(3)
+            continue
         
         #check whether the HTTP response code is 200, if yes then logpull success and exit the loop
         if r.status_code == 200:
