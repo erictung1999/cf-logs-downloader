@@ -39,39 +39,55 @@ Here are the list of parameters that you can leverage within the tool:
   -c config.yml, --config config.yml
                         Specify the path to the YAML configuration file.
   -z ZONE_ID, --zone ZONE_ID
-                        Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable
-                        not set. This will override CF_ZONE_ID variable.
+                        Specify the Cloudflare Zone ID, if CF_ZONE_ID
+                        environment variable not set. This will override
+                        CF_ZONE_ID variable.
   -t TOKEN, --token TOKEN
-                        Specify your Cloudflare Access Token, if CF_TOKEN environment
-                        variable not set. This will override CF_TOKEN variable.
-  -r RATE, --rate RATE  Specify the log sampling rate from 0.01 to 1. Default is 1.
+                        Specify your Cloudflare Access Token, if CF_TOKEN
+                        environment variable not set. This will override
+                        CF_TOKEN variable.
+  -r RATE, --rate RATE  Specify the log sampling rate from 0.01 to 1. Default
+                        is 1.
   -i INTERVAL, --interval INTERVAL
-                        Specify the interval between each logpull in seconds. Default is 60
-                        seconds.
-  -n NICE, --nice NICE  Specify the niceness of the logpull process from -20 (highest
-                        priority) to 19 (lowest priority). Default is -10.
-  --path /log/path/     Specify the path to store logs. By default, it will save to
-                        /var/log/cf_logs/.
-  --prefix PREFIX       Specify the prefix name of the logfile being stored on local storage.
-                        By default, the file name will begins with cf_logs.
-  --no-organize         Instruct the program to store raw logs as is, without organizing them
-                        into date and time folder.
+                        Specify the interval between each logpull in seconds.
+                        Default is 60 seconds.
+  -n NICE, --nice NICE  Specify the niceness of the logpull process from -20
+                        (highest priority) to 19 (lowest priority). Default is
+                        -10.
+  --path /log/path/     Specify the path to store logs. By default, it will
+                        save to /var/log/cf_logs/.
+  --prefix PREFIX       Specify the prefix name of the logfile being stored on
+                        local storage. By default, the file name will begins
+                        with cf_logs.
+  --no-organize         Instruct the program to store raw logs as is, without
+                        organizing them into date and time folder.
   --no-gzip             Do not compress the raw logs.
-  --bot-management      Specify this parameter if your zone has Bot Management enabled and
-                        you want to include Bot Management related fields in your logs.
-  --one-time            Only pull logs from Cloudflare for one time, without scheduling
-                        capability. You must specify the start time and end time of the logs
-                        to be pulled from Cloudflare.
+  --bot-management      Specify this parameter if your zone has Bot Management
+                        enabled and you want to include Bot Management related
+                        fields in your logs.
+  --one-time            Only pull logs from Cloudflare for one time, without
+                        scheduling capability. You must specify the start time
+                        and end time of the logs to be pulled from Cloudflare.
   --start-time START_TIME
-                        Specify the start time of the logs to be pulled from Cloudflare. The
-                        start time is inclusive. You must follow the ISO 8601 (RFC 3339) date
-                        format, in UTC timezone. Example: 2020-12-31T12:34:56Z
-  --end-time END_TIME   Specify the end time of the logs to be pulled from Cloudflare. The
-                        end time is exclusive. You must follow the ISO 8601 (RFC 3339) date
-                        format, in UTC timezone. Example: 2020-12-31T12:35:00Z
-  --install-service     Install the program as a systemd service. The service will execute
-                        the program from the path where you install the service.
+                        Specify the start time of the logs to be pulled from
+                        Cloudflare. The start time is inclusive. You must
+                        follow the ISO 8601 (RFC 3339) date format, in UTC
+                        timezone. Example: 2020-12-31T12:34:56Z
+  --end-time END_TIME   Specify the end time of the logs to be pulled from
+                        Cloudflare. The end time is exclusive. You must follow
+                        the ISO 8601 (RFC 3339) date format, in UTC timezone.
+                        Example: 2020-12-31T12:35:00Z
+  --install-service     Install the program as a systemd service. The service
+                        will execute the program from the path where you
+                        install the service.
   --uninstall-service   Uninstall the systemd service.
+  --list-queue          List all the pending tasks in the queue which has
+                        failed before, without beautifying the result (raw
+                        JSON).
+  --list-queue-beauty   List all the pending tasks in the queue which has
+                        failed before, with beautifying the result.
+  --queue-size          Display the number of pending tasks in the queue which
+                        has failed before.
   --debug               Enable debugging functionality.
   -v, --version         Show program version.
 ```
@@ -200,16 +216,71 @@ Usually command line arguments will take the highest priority among the others. 
 
 	Expected outcome: your logs will be stored in `/home/user/cf_logging/example_com_1970-01-01T18:00:00Z~1970-01-01T18:00:30Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
 
+## Retrieving items in queue
+1. Specifying `--list-queue` as the parameter will display the list of failed tasks waiting for retry, but without any formatting and sorting. The output will look like this:
+	`
+	[{"id": 56, "data": {"folder_time": "2021-04-21 12:36:00", "log_start_time_utc": "2021-04-21 04:36:00", "log_end_time_utc": "2021-04-21 04:36:30", "reason": "Logpull error"}, "timestamp": 1618979892.9301205}, {"id": 57, "data": {"folder_time": "2021-04-21 12:36:30", "log_start_time_utc": "2021-04-21 04:36:30", "log_end_time_utc": "2021-04-21 04:37:00", "reason": "Logpull error"}, "timestamp": 1618979923.0259676}, {"id": 58, "data": {"folder_time": "2021-04-21 12:35:00", "log_start_time_utc": "2021-04-21 04:35:00", "log_end_time_utc": "2021-04-21 04:35:30", "reason": "Logpull error"}, "timestamp": 1618979948.115379}, {"id": 59, "data": {"folder_time": "2021-04-21 12:37:00", "log_start_time_utc": "2021-04-21 04:37:00", "log_end_time_utc": "2021-04-21 04:37:30", "reason": "Logpull error"}, "timestamp": 1618979952.9384732}]
+	`
+2. Specifying `--list-queue-beauty` as the parameter will display the list of failed tasks waiting for retry. This option provides formatting as well as sorting based on the log start time. The output will look like this:
+	```
+	[
+	  {
+	    "id": 65,
+	    "data": {
+	      "folder_time": "2021-04-21 12:34:30",
+	      "log_start_time_utc": "2021-04-21 04:34:30",
+	      "log_end_time_utc": "2021-04-21 04:35:00",
+	      "reason": "Logpull error"
+	    },
+	    "timestamp": 1618980074.8670156
+	  },
+	  {
+	    "id": 58,
+	    "data": {
+	      "folder_time": "2021-04-21 12:35:00",
+	      "log_start_time_utc": "2021-04-21 04:35:00",
+	      "log_end_time_utc": "2021-04-21 04:35:30",
+	      "reason": "Logpull error"
+	    },
+	    "timestamp": 1618979948.115379
+	  },
+	  {
+	    "id": 61,
+	    "data": {
+	      "folder_time": "2021-04-21 12:35:30",
+	      "log_start_time_utc": "2021-04-21 04:35:30",
+	      "log_end_time_utc": "2021-04-21 04:36:00",
+	      "reason": "Logpull error"
+	    },
+	    "timestamp": 1618980011.489889
+	  },
+	  {
+	    "id": 56,
+	    "data": {
+	      "folder_time": "2021-04-21 12:36:00",
+	      "log_start_time_utc": "2021-04-21 04:36:00",
+	      "log_end_time_utc": "2021-04-21 04:36:30",
+	      "reason": "Logpull error"
+	    },
+	    "timestamp": 1618979892.9301205
+	  }
+	]
+	```
+3. Specifying `--queue-size` as the parameter will display the number of items inside the queue. Useful to know how many failed tasks pending for retry.
+4. If you specify any of the parameters as listed above, all other parameters that you specified (e.g. `-z` or `-t`) will be ignored.
+5. Currently it does not support separating queues based on Zone ID (domain). You may get unexpected behavior when you try to change the Zone ID while there are items in the queue, which is not bind to any Zone IDs.
+
 ## Known issues
 1. None
 
 ## Notes
 1. Currently only Cloudflare API Token can be used to authenticate against Cloudflare APIs. Global API key is not supported, as this is a more insecure option.
 2. All the logpull activity logs will be written in `/var/log/cf_logs_downloader/` folder. Make sure you have the appropriate permission (root) to run the script.
-3. Each successful logpull activity will be written in `succ.log` file, while each failed logpull activity will be written in `fail.log`.
-4. Each logpull activity will be given 5 attempts. If the first attempt fails (due to network conditions, Cloudflare API issue, etc.), this tool will retry for another 4 times.
-5. If you specify `--one-time` parameter, you must specify `--start-time` and `--end-time` at the same time and vice versa.
-6. The `--start-date` must be no more than 7 days earlier than now (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
-7. The `--end-date` must be at least 1 minute earlier than now and later than `--start-date` (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
-8. The maximum range between `--start-time` and `--end-time` must be 1 hour only. Otherwise, Cloudflare API calls will fail (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)). 
-9. Only specify `--bot-management` if your zone has Bot Management enabled, otherwise Cloudflare API will return Error 1010 - auth.forbidden.
+3. Each successful logpull activity will be written in `succ.log` file.
+4. If a logpull task failed, the failed task will be put inside a queue. A separate thread will keep checking the queue for new items, and reattempt the logpull process. The thread will pick up new items after each logpull activity for every 3 seconds. If there's 3 consequtive failed logpull activities, then the thread will wait for 60 seconds before performing the next logpull activity. 
+5. Some logpull tasks can't be retried because of known error (for example, requesting bot management field from a zone which does not have bot management enabled). In this case, the failed logpull activity will be written in `fail.log`.
+6. If you specify `--one-time` parameter, you must specify `--start-time` and `--end-time` at the same time and vice versa.
+7. The `--start-date` must be no more than 7 days earlier than now (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
+8. The `--end-date` must be at least 1 minute earlier than now and later than `--start-date` (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
+9. The maximum range between `--start-time` and `--end-time` must be 1 hour only. Otherwise, Cloudflare API calls will fail (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)). 
+10. Only specify `--bot-management` if your zone has Bot Management enabled, otherwise Cloudflare API will return Error 1010 - auth.forbidden.
