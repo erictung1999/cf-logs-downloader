@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.5.0"
+ver_num = "2.5.1"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -596,7 +596,7 @@ Based on the interval setting configured by the user, this method will only hand
 '''
 def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     
-    global num_of_running_thread, logger, retry_attempt, final_fields, bot_management, log_dest, queue
+    global num_of_running_thread, logger, retry_attempt, final_fields, bot_management, log_dest, queue, one_time
 
     #a list to store list of objects - log destination configuration
     log_dest_per_thread = []
@@ -712,7 +712,7 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
                 continue
             
     #check whether the logpull process from Cloudflare API has been successfully completed, if yes then proceed with next steps
-    if request_success is False:
+    if request_success is False and one_time is False:
         #check if there's a need to add failed tasks to queue, if no, just add it to the log
         if skip_add_queue is True:
             fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Logpull error)")
@@ -743,10 +743,12 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
             logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to save logs to local storage (" + each_log_dest.get('name') + "): " + str(e))
             #fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + " - Write log error)")
             #add failed tasks to queue
-            queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Write log error'})
+            if one_time is False:
+                queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Write log error'})
             return check_if_exited(), False
 
-    succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + ")")
+    if one_time is False:
+        succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + ")")
 
     #invoke this method to check whether the user triggers program exit sequence
     return check_if_exited(), True
