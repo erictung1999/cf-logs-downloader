@@ -2,7 +2,7 @@
 
 #import libraries needed in this program
 #'requests' library needs to be installed first
-import requests, time, threading, os, json, logging, sys, argparse, logging.handlers, yaml, yschema, tempfile, signal
+import requests, time, threading, os, json, logging, sys, argparse, logging.handlers, yaml, yschema, tempfile, signal, persistqueue
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.3.4"
+ver_num = "2.4.0"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -31,15 +31,13 @@ zone_id = access_token = start_time = end_time = final_fields = log_dest = ""
 #the default value for the interval between each logpull process
 interval = 60
 
-#specify the number of attempts to retry in the event of error
-retry_attempt = 5
-
 #disable unverified HTTPS request warning in when using Requests library
 #requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 #set the below settings to default: False
 one_time = bot_management = False
 
+#specify the path to install the systemd service
 service_path = '/etc/systemd/system/cf-logs-downloader.service'
 
 '''
@@ -87,6 +85,12 @@ logger.addHandler(handler_file)
 logger.addHandler(handler_console)
 succ_logger.addHandler(succ_handler_file)
 fail_logger.addHandler(fail_handler_file)
+
+#create a SQLite queue system to handle failed tasks
+queue = persistqueue.SQLiteQueue('/var/log/cf_logs_downloader/queue/', auto_commit=True, multithreading=True)
+
+#create a threading event for wait() function
+event = threading.Event()
 
 '''
 This is the starting point of the program. It will initialize the parameters supplied by the user and save it in a variable.
@@ -469,9 +473,12 @@ This method will check if the number of running threads is 0 (means no logpull s
 This method also sets the is_exit flag so that other logpull subprocess can check this flag before they exit.
 '''
 def graceful_terminate(signum, frame):
-    global is_exit, num_of_running_thread
+    global is_exit, num_of_running_thread, event
 
     is_exit = True
+
+    #stop all the sleep timers in other methods, particularly queue_thread()
+    event.set()
     print("")
     logger.info(str(datetime.now()) + " --- " + signal.Signals(signum).name + " detected. Initiating program exit. Finishing up log download tasks...")
     if num_of_running_thread <= 0:
@@ -507,14 +514,65 @@ def write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, logfile_path, data
     
     return True, True
 
+'''
+This method will be run as a separate thread
+Its main responsibility is to pick up new tasks from the queue and perform the logpull tasks again.
+'''
+def queue_thread():
+    global num_of_running_thread, queue, is_exit, event
+
+    #ensure that this process is also counted as one running thread, useful to perform task cleanup while stopping the process
+    num_of_running_thread += 1
+
+    #failed count to check how many failed tasks
+    failed_count = 0
+
+    #wait for 5 seconds before starting the process below, doesn't make sense to check the queue immediately after running the tool
+    event.wait(5)
+
+    #keep below process in a loop until it's terminated by the user
+    while True:
+        #check whether the queue has any content (size larger than 0)
+        if queue.size > 0:
+            #get the item from the queue based on FIFO
+            item = queue.get()
+
+            #then run the logpull task again
+            logger.info(str(datetime.now()) + " --- Retrying log range " + item.get('log_start_time_utc').isoformat() + "Z to " + item.get('log_end_time_utc').isoformat() + "Z from queue due to " + item.get('reason') + "... (currently " + str(queue.size) + " item(s) left in the queue)")
+            null, status = logs_thread(item.get('folder_time'), item.get('log_start_time_utc'), item.get('log_end_time_utc'))
+
+            #check the status returned from the logpull process, if True means the last logpull task has been successful
+            if status is True:
+                failed_count = 0
+                event.wait(3)
+            else:
+                #if not, increment the failed count counter, also check if the failed tasks more than or equal to 3
+                failed_count += 1
+                if failed_count >= 3:
+                    #too many failed tasks, wait for 60 seconds and try again
+                    event.wait(60)
+                else:
+                    #else, just wait for 3 seconds
+                    event.wait(3)
+        else:
+            #if no item in the queue, wait for 5 seconds and try again
+            event.wait(5)
+
+        #check if the user wants to stop the logpull process, if no then just continue the looping
+        if is_exit is True:
+            time.sleep(1)
+            return check_if_exited()
+        else:
+            pass
+
           
 '''
 This method will handle the overall log processing tasks and it will run as a separate thread.
 Based on the interval setting configured by the user, this method will only handle logs for a specific time slot.
 '''
-def logs(current_time, log_start_time_utc, log_end_time_utc):
+def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     
-    global num_of_running_thread, logger, retry_attempt, final_fields, bot_management, log_dest
+    global num_of_running_thread, logger, retry_attempt, final_fields, bot_management, log_dest, queue
 
     #a list to store list of objects - log destination configuration
     log_dest_per_thread = []
@@ -522,9 +580,16 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     
     #add one to the variable to indicate number of running threads. useful to determine whether to exit the program gracefully
     num_of_running_thread += 1
+
+    #specify the number of attempts to retry in the event of error
+    #Note! Setting 0 will prevent retrying logpull tasks as defined in below code. The process will be replaced by queue_thread() instead.
+    retry_attempt = 0
     
     #a variable to check whether the request to Cloudflare API is successful.
     request_success = False
+
+    #a variable to check whether we should skip adding failed items to the queue (based on situation)
+    skip_add_queue = False
     
     #if the user instructs the program to do logpull for only one time, the logs will not be stored in folder that follows the naming convention: date and time
     if one_time is True or (all(d.get('no_organize') is True for d in log_dest)):
@@ -565,7 +630,7 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
     #check if the python list is empty. Empty list means the particular logpull operation can be skipped because the log file already exists in all destinations.
     if not log_dest_per_thread_final:
         logger.warning(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logfile exists in all paths. Skipping.")
-        return check_if_exited()
+        return check_if_exited(), True
     
     #specify the URL for the Cloudflare API endpoint, with parameters such as Zone ID, the start time and end time of the logs to pull, timestamp format, sample rate and the fields to be included in the logs
     url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received?start=" + log_start_time_rfc3339 + "&end=" + log_end_time_rfc3339 + "&timestamps="+ timestamp_format +"&sample=" + sample_rate + "&fields=" + final_fields
@@ -607,6 +672,7 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
                 if response["success"] is False:
                     logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + ("Do you have Bot Management enabled in your zone?" if response["errors"][0]["code"] == 1010 and bot_management is True else ("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                     if response["errors"][0]["code"] == 1010 and bot_management is True:
+                        skip_add_queue = True
                         break
                     time.sleep(3)
                     continue
@@ -623,8 +689,12 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
             
     #check whether the logpull process from Cloudflare API has been successfully completed, if yes then proceed with next steps
     if request_success is False:
-        fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Logpull error)")
-        return check_if_exited()
+        #check if there's a need to add failed tasks to queue, if no, just add it to the log
+        if skip_add_queue is True:
+            fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Logpull error)")
+        else:
+            queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Logpull error'})
+        return check_if_exited(), False
 
     #Proceed to save the logs
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs requested. Saving logs...")
@@ -647,13 +717,15 @@ def logs(current_time, log_start_time_utc, log_end_time_utc):
         else:
             #unsuccessful of write logs
             logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to save logs to local storage (" + each_log_dest.get('name') + "): " + str(e))
-            fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + " - Write log error)")
-            return check_if_exited()
+            #fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + " - Write log error)")
+            #add failed tasks to queue
+            queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Write log error'})
+            return check_if_exited(), False
 
     succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + ")")
 
     #invoke this method to check whether the user triggers program exit sequence
-    return check_if_exited()
+    return check_if_exited(), True
 
         
 ####################################################################################################       
@@ -673,7 +745,7 @@ logger.info(str(datetime.now()) + " --- Cloudflare ELS logs download tasks start
 
 #if the user instructs the program to do logpull for only one time, the program will not do the logpull jobs repeatedly
 if one_time is True:
-    threading.Thread(target=logs, args=(None, start_time_static, end_time_static)).start()
+    threading.Thread(target=logs_thread, args=(None, start_time_static, end_time_static)).start()
 else:
     #first get the current system time, both local and UTC time.
     #the purpose of getting UTC time is to facilitate the calculation of the start and end time to pull the logs from Cloudflare API
@@ -692,6 +764,9 @@ else:
     #below code will explain the usage of this in detail
     initial_time = time.time()
 
+    #create a new thread to handle failed tasks inside queue
+    threading.Thread(target=queue_thread).start()
+
     #force the program to run indefinitely, unless the user stops it with Ctrl+C
     while True:
 
@@ -699,7 +774,7 @@ else:
         log_end_time_utc = log_start_time_utc + timedelta(seconds=interval)
 
         #create a new thread to handle the logs processing. the target method is logs() and 3 parameters are supplied to this method
-        threading.Thread(target=logs, args=(current_time, log_start_time_utc, log_end_time_utc)).start()
+        threading.Thread(target=logs_thread, args=(current_time, log_start_time_utc, log_end_time_utc)).start()
 
         #assigning start and end time to the next iteration
         log_start_time_utc = log_end_time_utc
