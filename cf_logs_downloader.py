@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.4.0"
+ver_num = "2.5.0"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -125,12 +125,30 @@ def initialize_arg():
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
     parser.add_argument("--install-service", help="Install the program as a systemd service. The service will execute the program from the path where you install the service.", action="store_true")
     parser.add_argument("--uninstall-service", help="Uninstall the systemd service.", action="store_true")
+    parser.add_argument("--list-queue", help="List all the pending tasks in the queue which has failed before, without beautifying the result (raw JSON).", action="store_true")
+    parser.add_argument("--list-queue-beauty", help="List all the pending tasks in the queue which has failed before, with beautifying the result.", action="store_true")
+    parser.add_argument("--queue-size", help="Display the number of pending tasks in the queue which has failed before.", action="store_true")
     parser.add_argument("--debug", help="Enable debugging functionality.", action="store_true")
     parser.add_argument("-v", "--version", help="Show program version.", action="version", version="Version " + ver_num)
     
     #parse the parameters supplied by the user, and check whether the parameters match the one specified above
     #if it does not match, an error message will be given to the user and the program will exit
     args = parser.parse_args()
+
+    #if user specifies this parameter, list the queue as it is without any beautification and sorting
+    if args.list_queue:
+        print(json.dumps(queue.queue(), default=str))
+        sys.exit(0)
+
+    #if user specifies this parameter, list the queue with beautification and sorting based on log_start_time_utc
+    if args.list_queue_beauty:
+        print(json.dumps(sorted(queue.queue(), key=sort_json_by_log_start_time_utc), default=str, indent=2))
+        sys.exit(0)
+
+    #if user specifies this parameter, display the current size of the queue (how many items in the queue)
+    if args.queue_size:
+        print(str(queue.size))
+        sys.exit(0)
 
     #catch someone who tries to "install and uninstall" service, which is definitely not logic.
     if args.install_service and args.uninstall_service:
@@ -322,7 +340,13 @@ def get_yaml_schema():
         sys.exit(2)
     except Exception as e:
         logger.critical(str(datetime.now()) + " --- Unable to parse YAML schema: " + str(e) + ". Clone the repository from Github, or download the release file and try again.")
-        sys.exit(2)        
+        sys.exit(2)
+
+'''
+This method sorts the incoming JSON object (task queue) by log_start_time_utc.
+'''
+def sort_json_by_log_start_time_utc(value):
+    return value["data"]["log_start_time_utc"]
 
 '''
 This method will install the tool as a systemd service.
