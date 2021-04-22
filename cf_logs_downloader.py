@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.5.1"
+ver_num = "2.5.2"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -614,6 +614,10 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
 
     #a variable to check whether we should skip adding failed items to the queue (based on situation)
     skip_add_queue = False
+
+    status_code = 0
+    cf_status_code = 0
+    cf_err_msg = ""
     
     #if the user instructs the program to do logpull for only one time, the logs will not be stored in folder that follows the naming convention: date and time
     if one_time is True or (all(d.get('no_organize') is True for d in log_dest)):
@@ -664,7 +668,6 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting logs from Cloudflare...")
     
-    #5 retries will be given for the logpull process, in case something happens
     for i in range(retry_attempt+1):
         #make a GET request to the Cloudflare API
         try:
@@ -676,6 +679,7 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
             continue
         
         #check whether the HTTP response code is 200, if yes then logpull success and exit the loop
+        status_code = r.status_code
         if r.status_code == 200:
             request_success = True
             break
@@ -695,6 +699,8 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
             if "success" in response:
                 if response["success"] is False:
                     logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + ("Do you have Bot Management enabled in your zone?" if response["errors"][0]["code"] == 1010 and bot_management is True else ("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                    cf_status_code = response["errors"][0]["code"]
+                    cf_err_msg = response["errors"][0]["message"]
                     if response["errors"][0]["code"] == 1010 and bot_management is True:
                         skip_add_queue = True
                         break
@@ -715,9 +721,9 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     if request_success is False and one_time is False:
         #check if there's a need to add failed tasks to queue, if no, just add it to the log
         if skip_add_queue is True:
-            fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Logpull error)")
+            fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Logpull error - HTTP " + str(status_code) + (", Cloudflare " + str(cf_status_code) + " - " + cf_err_msg if cf_status_code != 0 else "") + ")")
         else:
-            queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Logpull error'})
+            queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Logpull error (HTTP ' + str(status_code) + (", Cloudflare " + str(cf_status_code) + " - " + cf_err_msg if cf_status_code != 0 else "") + ')'})
         return check_if_exited(), False
 
     #Proceed to save the logs
@@ -744,7 +750,7 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
             #fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + " - Write log error)")
             #add failed tasks to queue
             if one_time is False:
-                queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Write log error'})
+                queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Write log error (' + each_log_dest.get('name') + ')'})
             return check_if_exited(), False
 
     if one_time is False:
