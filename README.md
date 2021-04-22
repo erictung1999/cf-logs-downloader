@@ -219,50 +219,50 @@ Usually command line arguments will take the highest priority among the others. 
 ## Retrieving items in queue
 1. Specifying `--list-queue` as the parameter will display the list of failed tasks waiting for retry, but without any formatting and sorting. The output will look like this:
 	`
-	[{"id": 56, "data": {"folder_time": "2021-04-21 12:36:00", "log_start_time_utc": "2021-04-21 04:36:00", "log_end_time_utc": "2021-04-21 04:36:30", "reason": "Logpull error"}, "timestamp": 1618979892.9301205}, {"id": 57, "data": {"folder_time": "2021-04-21 12:36:30", "log_start_time_utc": "2021-04-21 04:36:30", "log_end_time_utc": "2021-04-21 04:37:00", "reason": "Logpull error"}, "timestamp": 1618979923.0259676}, {"id": 58, "data": {"folder_time": "2021-04-21 12:35:00", "log_start_time_utc": "2021-04-21 04:35:00", "log_end_time_utc": "2021-04-21 04:35:30", "reason": "Logpull error"}, "timestamp": 1618979948.115379}, {"id": 59, "data": {"folder_time": "2021-04-21 12:37:00", "log_start_time_utc": "2021-04-21 04:37:00", "log_end_time_utc": "2021-04-21 04:37:30", "reason": "Logpull error"}, "timestamp": 1618979952.9384732}]
+	[{"id": 99, "data": {"folder_time": "2021-04-22 13:22:00", "log_start_time_utc": "2021-04-22 05:22:00", "log_end_time_utc": "2021-04-22 05:22:30", "reason": "Logpull error (HTTP 429, Cloudflare 10000 - Rate limited. Please wait and consider throttling your request speed)"}, "timestamp": 1619069053.252742}, {"id": 100, "data": {"folder_time": "2021-04-22 13:22:30", "log_start_time_utc": "2021-04-22 05:22:30", "log_end_time_utc": "2021-04-22 05:23:00", "reason": "Logpull error (HTTP 401, Cloudflare 10000 - Authentication error)"}, "timestamp": 1619069082.8486648}, {"id": 101, "data": {"folder_time": "2021-04-22 13:21:30", "log_start_time_utc": "2021-04-22 05:21:30", "log_end_time_utc": "2021-04-22 05:22:00", "reason": "Logpull error (HTTP 401, Cloudflare 10000 - Authentication error)"}, "timestamp": 1619069105.1588771}, {"id": 102, "data": {"folder_time": "2021-04-22 13:23:00", "log_start_time_utc": "2021-04-22 05:23:00", "log_end_time_utc": "2021-04-22 05:23:30", "reason": "Logpull error (HTTP 401, Cloudflare 10000 - Authentication error)"}, "timestamp": 1619069112.8409271}]
 	`
 2. Specifying `--list-queue-beauty` as the parameter will display the list of failed tasks waiting for retry. This option provides formatting as well as sorting based on the log start time. The output will look like this:
 	```
 	[
 	  {
-	    "id": 65,
+	    "id": 101,
 	    "data": {
-	      "folder_time": "2021-04-21 12:34:30",
-	      "log_start_time_utc": "2021-04-21 04:34:30",
-	      "log_end_time_utc": "2021-04-21 04:35:00",
-	      "reason": "Logpull error"
+	      "folder_time": "2021-04-22 13:21:30",
+	      "log_start_time_utc": "2021-04-22 05:21:30",
+	      "log_end_time_utc": "2021-04-22 05:22:00",
+	      "reason": "Logpull error (HTTP 401, Cloudflare 10000 - Authentication error)"
 	    },
-	    "timestamp": 1618980074.8670156
+	    "timestamp": 1619069105.1588771
 	  },
 	  {
-	    "id": 58,
+	    "id": 99,
 	    "data": {
-	      "folder_time": "2021-04-21 12:35:00",
-	      "log_start_time_utc": "2021-04-21 04:35:00",
-	      "log_end_time_utc": "2021-04-21 04:35:30",
-	      "reason": "Logpull error"
+	      "folder_time": "2021-04-22 13:22:00",
+	      "log_start_time_utc": "2021-04-22 05:22:00",
+	      "log_end_time_utc": "2021-04-22 05:22:30",
+	      "reason": "Logpull error (HTTP 429, Cloudflare 10000 - Rate limited. Please wait and consider throttling your request speed)"
 	    },
-	    "timestamp": 1618979948.115379
+	    "timestamp": 1619069053.252742
 	  },
 	  {
-	    "id": 61,
+	    "id": 100,
 	    "data": {
-	      "folder_time": "2021-04-21 12:35:30",
-	      "log_start_time_utc": "2021-04-21 04:35:30",
-	      "log_end_time_utc": "2021-04-21 04:36:00",
-	      "reason": "Logpull error"
+	      "folder_time": "2021-04-22 13:22:30",
+	      "log_start_time_utc": "2021-04-22 05:22:30",
+	      "log_end_time_utc": "2021-04-22 05:23:00",
+	      "reason": "Logpull error (HTTP 401, Cloudflare 10000 - Authentication error)"
 	    },
-	    "timestamp": 1618980011.489889
+	    "timestamp": 1619069082.8486648
 	  },
 	  {
-	    "id": 56,
+	    "id": 102,
 	    "data": {
-	      "folder_time": "2021-04-21 12:36:00",
-	      "log_start_time_utc": "2021-04-21 04:36:00",
-	      "log_end_time_utc": "2021-04-21 04:36:30",
-	      "reason": "Logpull error"
+	      "folder_time": "2021-04-22 13:23:00",
+	      "log_start_time_utc": "2021-04-22 05:23:00",
+	      "log_end_time_utc": "2021-04-22 05:23:30",
+	      "reason": "Logpull error (HTTP 401, Cloudflare 10000 - Authentication error)"
 	    },
-	    "timestamp": 1618979892.9301205
+	    "timestamp": 1619069112.8409271
 	  }
 	]
 	```
