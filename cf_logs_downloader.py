@@ -11,7 +11,7 @@ from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.5.2"
+ver_num = "2.5.3"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -81,7 +81,6 @@ succ_handler_file.setFormatter(succfail_formatter)
 fail_handler_file.setFormatter(succfail_formatter)
 
 #finally, add all handlers to their respective loggers
-logger.addHandler(handler_file)
 logger.addHandler(handler_console)
 succ_logger.addHandler(succ_handler_file)
 fail_logger.addHandler(fail_handler_file)
@@ -134,6 +133,12 @@ def initialize_arg():
     #parse the parameters supplied by the user, and check whether the parameters match the one specified above
     #if it does not match, an error message will be given to the user and the program will exit
     args = parser.parse_args()
+
+    one_time = args.one_time
+
+    #only allow writing activity logs to disk when the user does not use one time operation.
+    if one_time is False:
+        logger.addHandler(handler_file)
 
     #if user specifies this parameter, list the queue as it is without any beautification and sorting
     if args.list_queue:
@@ -249,7 +254,6 @@ def initialize_arg():
         sys.exit(2)
     
     #if the user wants to do one-time operation, check the correctness of the start time and end time of the logs to pull.
-    one_time = args.one_time
     if one_time is True:
         if args.start_time and args.end_time:
             try:
@@ -268,7 +272,7 @@ def initialize_arg():
                 sys.exit(2)
         else:
             logger.critical(str(datetime.now()) + " --- No start time or end time specified for one-time operation. ")
-            sys.exit(2)
+            sys.exit(2)        
     
     #check if user specifies interval in the command line as parameter. If not, check the config file. Else, use the default value.
     #priority of reading interval value: arguments - config file - default value (60).
