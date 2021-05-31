@@ -9,7 +9,7 @@ from shutil import copy2
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.6.0"
+ver_num = "2.6.1"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -443,7 +443,6 @@ def verify_credential():
     except json.JSONDecodeError:
         #a non-JSON object returned by Cloudflare indicates that authentication successful
         pass
-    
 
 '''
 This method is to initialize the folder with the date and time of the logs being stored on local storage as the name of the folder
@@ -508,7 +507,7 @@ def graceful_terminate(signum, frame):
 This method is responsible to write logs to local storage after the logs have been pulled from Cloudflare API.
 Depending on the user preference, logs might need to save in compressed gzip format.
 '''
-def write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, logfile_path, data, no_gzip):
+def write_logs(logfile_path, data, no_gzip):
     dirname, basename = os.path.split(logfile_path)
     try:
         if no_gzip is True:
@@ -550,38 +549,42 @@ def queue_thread():
 
     #keep below process in a loop until it's terminated by the user
     while True:
-        #check whether the queue has any content (size larger than 0)
-        if queue.size > 0:
-            #get the item from the queue based on FIFO
-            item = queue.get()
+        try:
+            #check whether the queue has any content (size larger than 0)
+            if queue.size > 0:
+                #get the item from the queue based on FIFO
+                item = queue.get()
 
-            #then run the logpull task again
-            logger.info(str(datetime.now()) + " --- Retrying log range " + item.get('log_start_time_utc').isoformat() + "Z to " + item.get('log_end_time_utc').isoformat() + "Z from queue due to " + item.get('reason') + "... (currently " + str(queue.size) + " item(s) left in the queue)")
-            null, status = logs_thread(item.get('folder_time'), item.get('log_start_time_utc'), item.get('log_end_time_utc'))
+                #then run the logpull task again
+                logger.info(str(datetime.now()) + " --- Retrying log range " + item.get('log_start_time_utc').isoformat() + "Z to " + item.get('log_end_time_utc').isoformat() + "Z from queue due to " + item.get('reason') + "... (currently " + str(queue.size) + " item(s) left in the queue)")
+                null, status = logs_thread(item.get('folder_time'), item.get('log_start_time_utc'), item.get('log_end_time_utc'))
 
-            #check the status returned from the logpull process, if True means the last logpull task has been successful
-            if status is True:
-                failed_count = 0
-                event.wait(3)
-            else:
-                #if not, increment the failed count counter, also check if the failed tasks more than or equal to 3
-                failed_count += 1
-                if failed_count >= 3:
-                    #too many failed tasks, wait for 60 seconds and try again
-                    event.wait(60)
-                else:
-                    #else, just wait for 3 seconds
+                #check the status returned from the logpull process, if True means the last logpull task has been successful
+                if status is True:
+                    failed_count = 0
                     event.wait(3)
-        else:
-            #if no item in the queue, wait for 5 seconds and try again
-            event.wait(5)
+                else:
+                    #if not, increment the failed count counter, also check if the failed tasks more than or equal to 3
+                    failed_count += 1
+                    if failed_count >= 3:
+                        #too many failed tasks, wait for 60 seconds and try again
+                        event.wait(60)
+                    else:
+                        #else, just wait for 3 seconds
+                        event.wait(3)
+            else:
+                #if no item in the queue, wait for 5 seconds and try again
+                event.wait(5)
 
-        #check if the user wants to stop the logpull process, if no then just continue the looping
-        if is_exit is True:
-            time.sleep(1)
-            return check_if_exited()
-        else:
-            pass
+            #check if the user wants to stop the logpull process, if no then just continue the looping
+            if is_exit is True:
+                time.sleep(1)
+                return check_if_exited()
+            else:
+                pass
+        except Exception as e:
+            logger.critical(str(datetime.now()) + " --- Queue thread failed unexpectedly. Exception message: " + str(e))
+            continue
 
           
 '''
@@ -734,7 +737,7 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
         logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Writing logs " + str(i) + " of " + str(len(log_dest_per_thread_final)) + " (" + each_log_dest.get('name') + ") to " + str(each_log_dest.get('path')) + " ...")
 
         #write logs to the destination as specified by the user, with the option for gzip
-        result, e = write_logs(log_start_time_rfc3339,  log_end_time_rfc3339, each_log_dest.get('path'), gzip_resp, each_log_dest.get('no_gzip'))
+        result, e = write_logs(each_log_dest.get('path'), gzip_resp, each_log_dest.get('no_gzip'))
         if result is True:
             #successful of write logs
             logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs " + ("without gzip compression" if each_log_dest.get('no_gzip') is True else "compressed with gzip") + " (" + each_log_dest.get('name') + ") saved as " + str(each_log_dest.get('path')) + ". ")
