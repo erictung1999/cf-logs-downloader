@@ -9,7 +9,7 @@ from shutil import copy2
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.6.1"
+ver_num = "2.6.2"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -102,7 +102,7 @@ def initialize_arg():
     
     #specify which arguments are available to use in this program. The usage of the arguments will be printed when the user tells the program to display help message.
     parser.add_argument("-c", "--config", metavar="config.yml", help="Specify the path to the YAML configuration file.")
-    parser.add_argument("-z", "--zone", metavar="ZONE_ID",help="Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable.")
+    parser.add_argument("-z", "--zone", metavar="ZONE_ID", help="Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable.")
     parser.add_argument("-t", "--token", help="Specify your Cloudflare Access Token, if CF_TOKEN environment variable not set. This will override CF_TOKEN variable.")
     parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1.", type=float)
     parser.add_argument("-i", "--interval", help="Specify the interval between each logpull in seconds. Default is 60 seconds.", type=int)
@@ -114,6 +114,8 @@ def initialize_arg():
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
+    parser.add_argument("--exclude", help="Specify the list of fields to be excluded from Logpull. Separate each field by comma without spaces.")
+    parser.add_argument("--available-fields", help="Display the list of available fields used by the program. These fields are also included in the logpull by default (unless field exclusion is configured).", action="store_true")
     parser.add_argument("--install-service", help="Install the program as a systemd service. The service will execute the program from the path where you install the service.", action="store_true")
     parser.add_argument("--uninstall-service", help="Uninstall the systemd service.", action="store_true")
     parser.add_argument("--list-queue", help="List all the pending tasks in the queue which has failed before, without beautifying the result (raw JSON).", action="store_true")
@@ -161,6 +163,10 @@ def initialize_arg():
     #attempt to uninstall service as requested by the user
     if args.uninstall_service:
         uninstall_service()
+
+    if args.available_fields:
+        print(','.join(field for field in fields))
+        sys.exit(0)
         
     #check if user specifies the path to configuration file, if yes, attempt read settings from the configuration file
     if args.config:
@@ -316,8 +322,13 @@ def initialize_arg():
         log_dest[i]['no_gzip'] = True if args.no_gzip is True else log_dest[i].get('no_gzip')
     
     #exclude certain fields in logpush
-    for exclude_field in parsed_config.get('fields.exclude'):
-        fields.remove(exclude_field)
+    if args.exclude:
+        list_exclude_field = args.exclude.split(',')
+        for exclude_field in list_exclude_field:
+            fields.remove(exclude_field)
+    elif parsed_config.get('fields.exclude'):
+        for exclude_field in parsed_config.get('fields.exclude'):
+            fields.remove(exclude_field)
     final_fields = ','.join(field for field in fields)
 
 '''
