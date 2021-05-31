@@ -3,15 +3,13 @@
 #import libraries needed in this program
 #'requests' library needs to be installed first
 import requests, time, threading, os, json, logging, sys, argparse, logging.handlers, yaml, yschema, tempfile, signal, persistqueue
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from shutil import copy2
-from copy import deepcopy
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.5.3"
+ver_num = "2.6.0"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -31,11 +29,8 @@ zone_id = access_token = start_time = end_time = final_fields = log_dest = ""
 #the default value for the interval between each logpull process
 interval = 60
 
-#disable unverified HTTPS request warning in when using Requests library
-#requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-
 #set the below settings to default: False
-one_time = bot_management = False
+one_time = False
 
 #specify the path to install the systemd service
 service_path = '/etc/systemd/system/cf-logs-downloader.service'
@@ -43,13 +38,11 @@ service_path = '/etc/systemd/system/cf-logs-downloader.service'
 '''
 Specify the fields for the logs
 
-The following fields are available: BotScore,BotScoreSrc,CacheCacheStatus,CacheResponseBytes,CacheResponseStatus,CacheTieredFill,ClientASN,ClientCountry,ClientDeviceType,ClientIP,ClientIPClass,ClientRequestBytes,ClientRequestHost,ClientRequestMethod,ClientRequestPath,ClientRequestProtocol,ClientRequestReferer,ClientRequestURI,ClientRequestUserAgent,ClientSSLCipher,ClientSSLProtocol,ClientSrcPort,ClientXRequestedWith,EdgeColoCode,EdgeColoID,EdgeEndTimestamp,EdgePathingOp,EdgePathingSrc,EdgePathingStatus,EdgeRateLimitAction,EdgeRateLimitID,EdgeRequestHost,EdgeResponseBytes,EdgeResponseCompressionRatio,EdgeResponseContentType,EdgeResponseStatus,EdgeServerIP,EdgeStartTimestamp,FirewallMatchesActions,FirewallMatchesRuleIDs,FirewallMatchesSources,OriginIP,OriginResponseBytes,OriginResponseHTTPExpires,OriginResponseHTTPLastModified,OriginResponseStatus,OriginResponseTime,OriginSSLProtocol,ParentRayID,RayID,RequestHeaders,SecurityLevel,WAFAction,WAFProfile,WAFRuleID,WAFRuleMessage,WorkerCPUTime,WorkerStatus,WorkerSubrequest,WorkerSubrequestCount,ZoneID
+The following fields are available: BotScore,BotScoreSrc,CacheCacheStatus,CacheResponseBytes,CacheResponseStatus,CacheTieredFill,ClientASN,ClientCountry,ClientDeviceType,ClientIP,ClientIPClass,ClientRequestBytes,ClientRequestHost,ClientRequestMethod,ClientRequestPath,ClientRequestProtocol,ClientRequestReferer,ClientRequestURI,ClientRequestUserAgent,ClientSSLCipher,ClientSSLProtocol,ClientSrcPort,ClientXRequestedWith,EdgeColoCode,EdgeColoID,EdgeEndTimestamp,EdgePathingOp,EdgePathingSrc,EdgePathingStatus,EdgeRateLimitAction,EdgeRateLimitID,EdgeRequestHost,EdgeResponseBytes,EdgeResponseCompressionRatio,EdgeResponseContentType,EdgeResponseStatus,EdgeServerIP,EdgeStartTimestamp,FirewallMatchesActions,FirewallMatchesRuleIDs,FirewallMatchesSources,OriginIP,OriginResponseHTTPExpires,OriginResponseHTTPLastModified,OriginResponseStatus,OriginResponseTime,OriginSSLProtocol,ParentRayID,RayID,RequestHeaders,SecurityLevel,WAFAction,WAFProfile,WAFRuleID,WAFRuleMessage,WorkerCPUTime,WorkerStatus,WorkerSubrequest,WorkerSubrequestCount,ZoneID
 
-Deprecated log fields: WAFFlags,WAFMatchedVar
+Deprecated log fields: OriginResponseBytes,WAFFlags,WAFMatchedVar
 '''
-general_fields = ["CacheCacheStatus","CacheResponseBytes","CacheResponseStatus","CacheTieredFill","ClientASN","ClientCountry","ClientDeviceType","ClientIP","ClientIPClass","ClientRequestBytes","ClientRequestHost","ClientRequestMethod","ClientRequestPath","ClientRequestProtocol","ClientRequestReferer","ClientRequestURI","ClientRequestUserAgent","ClientSSLCipher","ClientSSLProtocol","ClientSrcPort","ClientXRequestedWith","EdgeColoCode","EdgeColoID","EdgeEndTimestamp","EdgePathingOp","EdgePathingSrc","EdgePathingStatus","EdgeRateLimitAction","EdgeRateLimitID","EdgeRequestHost","EdgeResponseBytes","EdgeResponseCompressionRatio","EdgeResponseContentType","EdgeResponseStatus","EdgeServerIP","EdgeStartTimestamp","FirewallMatchesActions","FirewallMatchesRuleIDs","FirewallMatchesSources","OriginIP","OriginResponseBytes","OriginResponseHTTPExpires","OriginResponseHTTPLastModified","OriginResponseStatus","OriginResponseTime","OriginSSLProtocol","ParentRayID","RayID","RequestHeaders","SecurityLevel","WAFAction","WAFProfile","WAFRuleID","WAFRuleMessage","WorkerCPUTime","WorkerStatus","WorkerSubrequest","WorkerSubrequestCount","ZoneID"]
-
-bot_fields = ["BotScore","BotScoreSrc"]
+fields = ["BotScore","BotScoreSrc","CacheCacheStatus","CacheResponseBytes","CacheResponseStatus","CacheTieredFill","ClientASN","ClientCountry","ClientDeviceType","ClientIP","ClientIPClass","ClientRequestBytes","ClientRequestHost","ClientRequestMethod","ClientRequestPath","ClientRequestProtocol","ClientRequestReferer","ClientRequestURI","ClientRequestUserAgent","ClientSSLCipher","ClientSSLProtocol","ClientSrcPort","ClientXRequestedWith","EdgeColoCode","EdgeColoID","EdgeEndTimestamp","EdgePathingOp","EdgePathingSrc","EdgePathingStatus","EdgeRateLimitAction","EdgeRateLimitID","EdgeRequestHost","EdgeResponseBytes","EdgeResponseCompressionRatio","EdgeResponseContentType","EdgeResponseStatus","EdgeServerIP","EdgeStartTimestamp","FirewallMatchesActions","FirewallMatchesRuleIDs","FirewallMatchesSources","OriginIP","OriginResponseHTTPExpires","OriginResponseHTTPLastModified","OriginResponseStatus","OriginResponseTime","OriginSSLProtocol","ParentRayID","RayID","RequestHeaders","SecurityLevel","WAFAction","WAFProfile","WAFRuleID","WAFRuleMessage","WorkerCPUTime","WorkerStatus","WorkerSubrequest","WorkerSubrequestCount","ZoneID"]
 
 #create three logging object for logging purposes
 logger = logging.getLogger("general_logger") #for general logging
@@ -98,7 +91,7 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global zone_id, access_token, sample_rate, interval, logger, start_time_static, end_time_static, one_time, bot_management, general_fields, final_fields, yaml_schema, log_dest
+    global zone_id, access_token, sample_rate, interval, logger, start_time_static, end_time_static, one_time, fields, final_fields, yaml_schema, log_dest
     
     welcome_msg = "A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage."
 
@@ -118,7 +111,6 @@ def initialize_arg():
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
     parser.add_argument("--no-gzip", help="Do not compress the raw logs.", action="store_true")
-    parser.add_argument("--bot-management", help="Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs.", action="store_true")
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
@@ -322,13 +314,11 @@ def initialize_arg():
     for i in range(len(log_dest)):
         log_dest[i]['no_organize'] = True if args.no_organize is True else log_dest[i].get('no_organize')
         log_dest[i]['no_gzip'] = True if args.no_gzip is True else log_dest[i].get('no_gzip')
-
-    #by default, we don't include Bot Management related fields for logpull - not all customers have Bot Management enabled in their zone.
-    #if the user has Bot Management enabled and would like to enable Bot Management related fields, they can specify --bot-management as parameter.
-    bot_management = True if args.bot_management is True or parsed_config.get("bot_management") is True else False
-    general_fields += (bot_fields if bot_management is True else [])
-    general_fields.sort()
-    final_fields = ','.join(field for field in general_fields)
+    
+    #exclude certain fields in logpush
+    for exclude_field in parsed_config.get('fields.exclude'):
+        fields.remove(exclude_field)
+    final_fields = ','.join(field for field in fields)
 
 '''
 This method is to retrieve the YAML schema from the schema file (schema.yml), and return the value of the schema to the caller.
@@ -600,7 +590,7 @@ Based on the interval setting configured by the user, this method will only hand
 '''
 def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     
-    global num_of_running_thread, logger, retry_attempt, final_fields, bot_management, log_dest, queue, one_time
+    global num_of_running_thread, logger, retry_attempt, final_fields, log_dest, queue, one_time
 
     #a list to store list of objects - log destination configuration
     log_dest_per_thread = []
@@ -702,10 +692,10 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
             #to check whether "success" key exists in JSON object, if yes, check whether the value is False, and print out the error message
             if "success" in response:
                 if response["success"] is False:
-                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + ("Do you have Bot Management enabled in your zone?" if response["errors"][0]["code"] == 1010 and bot_management is True else ("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
+                    logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to request logs from Cloudflare with error code " + str(response["errors"][0]["code"]) + ": " + response["errors"][0]["message"] + ". " + ("Consider removing BotScore and BotScoreSrc fields if your zone does not have Bot Management enabled." if response["errors"][0]["code"] == 1010 and ('BotScore' in fields or 'BotScoreSrc' in fields) else ("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
                     cf_status_code = response["errors"][0]["code"]
                     cf_err_msg = response["errors"][0]["message"]
-                    if response["errors"][0]["code"] == 1010 and bot_management is True:
+                    if response["errors"][0]["code"] == 1010 and ('BotScore' in fields or 'BotScoreSrc' in fields):
                         skip_add_queue = True
                         break
                     time.sleep(3)
