@@ -62,9 +62,6 @@ Here are the list of parameters that you can leverage within the tool:
   --no-organize         Instruct the program to store raw logs as is, without
                         organizing them into date and time folder.
   --no-gzip             Do not compress the raw logs.
-  --bot-management      Specify this parameter if your zone has Bot Management
-                        enabled and you want to include Bot Management related
-                        fields in your logs.
   --one-time            Only pull logs from Cloudflare for one time, without
                         scheduling capability. You must specify the start time
                         and end time of the logs to be pulled from Cloudflare.
@@ -77,6 +74,11 @@ Here are the list of parameters that you can leverage within the tool:
                         Cloudflare. The end time is exclusive. You must follow
                         the ISO 8601 (RFC 3339) date format, in UTC timezone.
                         Example: 2020-12-31T12:35:00Z
+  --exclude EXCLUDE     Specify the list of fields to be excluded from
+                        Logpull. Separate each field by comma without spaces.
+  --available-fields    Display the list of available fields used by the
+                        program. These fields are also included in the logpull
+                        by default (unless field exclusion is configured).
   --install-service     Install the program as a systemd service. The service
                         will execute the program from the path where you
                         install the service.
@@ -98,15 +100,15 @@ This tool supports specifying the settings via YAML configuration file. Refer to
 2. `cf_token` (string, optional) - Specify the Cloudflare Access Token.
 3. `rate` (float, optional) - Specify log sampling rate from 0.01 to 1. Default is 1.
 4. `interval` (int, optional) - Specify the interval between each logpull in seconds. Default is 60 seconds.
-5. `bot_management` (boolean, optional) - Specify this parameter if your zone has Bot Management enabled and you want to include Bot Management related fields in your logs. Acceptable values: `true` or `false`.
-6. `nice` (int, optional) - Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.
-7. `debug` (boolean, optional) -  Enable debugging functionality. Acceptable values: `true` or `false`.
-8.  `log_dest` (list, optional) - Specify this to further configure the settings for the destination of the logs. This includes multiple options as shown below:
+5. `nice` (int, optional) - Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.
+6. `debug` (boolean, optional) -  Enable debugging functionality. Acceptable values: `true` or `false`.
+7.  `log_dest` (list, optional) - Specify this to further configure the settings for the destination of the logs. This includes multiple options as shown below:
 	*  `name` (string, required) - Give a unique name of the log destination configuration. Useful to identify in activity log.
 	* `path` (string, required) - Specify the path to store logs. By default, it will save to /var/log/cf_logs/
 	* `prefix` (string, required) - Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.
 	* `no_organize` (boolean, required) - Instruct the program to store raw logs as is, without organizing them into date and time folder. Acceptable values: `true` or `false`.
 	* `no_gzip` (boolean, required) - Do not compress the raw logs. Acceptable values: `true` or `false`.
+8. `fields.exclude` (list, optional) - Specify the list of fields you want to exclude from logpull. You can execute `./cf-logs-downloader --available-fields` to retrieve the list of fields which are available to logpull.
 
 You may refer to schema.yml for more information.
 
@@ -116,7 +118,6 @@ cf_zone_id: your_zone_id_here
 cf_token: your_token_here
 rate: 0.5
 interval: 30
-bot_management: true
 nice: -10
 debug: true
 log_dest:
@@ -130,6 +131,9 @@ log_dest:
     prefix: number_two
     no_organize: true
     no_gzip: false
+fields.exclude:
+  - ZoneID
+  - WAFProfile
 ```
 
 ## Environment variables
@@ -141,7 +145,7 @@ Here are some environment variables that you can create while using this tool:
 Usually command line arguments will take the highest priority among the others. However, depends on the settings, some of them might have different order of precedence:
 1. **For Cloudflare Zone ID and Cloudflare Access Token:** command line arguments - environment variable - configuration file
 2. **For sample rate, logpull interval and niceness:** command line arguments - configuration file - default value
-3. **For bot management and debug option**: the option will be turned on when the user specifies it either as command line arguments or inside the configuration file.
+3. **For debug option**: the option will be turned on when the user specifies it either as command line arguments or inside the configuration file.
 4. **For log path and log file name prefix**: specifying this option as command line arguments will override everything specified under `log_dest` inside the configuration file.
 5.  **For no organize and no gzip**: specifying this option as command line arguments will override `no_gzip` and `no_organize` option in each item under `log_dest` inside the configuration file.
 
@@ -155,7 +159,6 @@ Usually command line arguments will take the highest priority among the others. 
 	* Log filename prefix: `cf_logs`
 	* Enable folder organize by date and time
 	* Enable Gzip compression
-	* No Bot Management fields (BotScore & BotScoreSrc) included in logpull
 	* Niceness: -10
 	* No debugging
 
@@ -184,10 +187,10 @@ Usually command line arguments will take the highest priority among the others. 
 	
 	Expected outcome: your logs will be stored in `/var/log/cf_logs/1970-01-01/1800/cf_logs_1970-01-01T18:00:00Z~1970-01-01T18:00:10Z.json.gz` initially. Subsequent logs will be stored in their respective folder based on date and time.
 
-4. To instruct the tool to include Bot Management fields (BotScore and BotScoreSrc), not to save the logs in compressed (gzip) format, and store the logs in a different folder:
+4. To instruct the tool not to save the logs in compressed (gzip) format, and store the logs in a different folder:
 
 	```
-	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN --bot-management --no-gzip --path /root/Downloads/my_cloudflare_log/
+	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN --no-gzip --path /root/Downloads/my_cloudflare_log/
 	```
 
 	Expected outcome: your logs will be stored in `/root/Downloads/my_cloudflare_log/1970-01-01/1800/cf_logs_1970-01-01T18:00:00Z~1970-01-01T18:01:00Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
@@ -215,6 +218,12 @@ Usually command line arguments will take the highest priority among the others. 
 	```
 
 	Expected outcome: your logs will be stored in `/home/user/cf_logging/example_com_1970-01-01T18:00:00Z~1970-01-01T18:00:30Z.json` initially. Subsequent logs will be stored in their respective folder based on date and time.
+
+8. To exclude certain log fields in logpull task (e.g. ZoneID and WAFProfile), use this command:
+
+	```
+	$ sudo ./cf_logs_downloader.py -z YOUR_ZONE_ID -t YOUR_API_TOKEN --exclude ZoneID,WAFProfile
+	```
 
 ## Retrieving items in queue
 1. Specifying `--list-queue` as the parameter will display the list of failed tasks waiting for retry, but without any formatting and sorting. The output will look like this:
@@ -282,5 +291,4 @@ Usually command line arguments will take the highest priority among the others. 
 6. If you specify `--one-time` parameter, you must specify `--start-time` and `--end-time` at the same time and vice versa.
 7. The `--start-date` must be no more than 7 days earlier than now (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
 8. The `--end-date` must be at least 1 minute earlier than now and later than `--start-date` (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
-9. The maximum range between `--start-time` and `--end-time` must be 1 hour only. Otherwise, Cloudflare API calls will fail (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)). 
-10. Only specify `--bot-management` if your zone has Bot Management enabled, otherwise Cloudflare API will return Error 1010 - auth.forbidden.
+9. The maximum range between `--start-time` and `--end-time` must be 1 hour only. Otherwise, Cloudflare API calls will fail (according to [Cloudflare Developers Docs](https://developers.cloudflare.com/logs/logpull-api/requesting-logs)).
