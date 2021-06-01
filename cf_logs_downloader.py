@@ -9,7 +9,7 @@ from shutil import copy2
 from gzip import decompress
 
 #specify version number of the program
-ver_num = "2.6.2"
+ver_num = "2.6.3"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -114,7 +114,7 @@ def initialize_arg():
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
-    parser.add_argument("--exclude", help="Specify the list of fields to be excluded from Logpull. Separate each field by comma without spaces.")
+    parser.add_argument("--exclude", metavar="field1,field2", help="Specify the list of fields to be excluded from Logpull. Separate each field by comma without spaces.")
     parser.add_argument("--available-fields", help="Display the list of available fields used by the program. These fields are also included in the logpull by default (unless field exclusion is configured).", action="store_true")
     parser.add_argument("--install-service", help="Install the program as a systemd service. The service will execute the program from the path where you install the service.", action="store_true")
     parser.add_argument("--uninstall-service", help="Uninstall the systemd service.", action="store_true")
@@ -323,7 +323,8 @@ def initialize_arg():
     
     #exclude certain fields in logpush
     if args.exclude:
-        list_exclude_field = args.exclude.split(',')
+        list_exclude_field = "".join(args.exclude.split()) #remove all whitespaces
+        list_exclude_field = list_exclude_field.split(',') #
         for exclude_field in list_exclude_field:
             fields.remove(exclude_field)
     elif parsed_config.get('fields.exclude'):
