@@ -16,7 +16,7 @@ A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log S
 5. Verify the script is working by executing `./cf_logs_downloader -v`. You should see this:
 
 	```
-	Version 2.6.3
+	Version 2.6.2
 	```
 
 ## Create an API Token
@@ -74,7 +74,8 @@ Here are the list of parameters that you can leverage within the tool:
                         Cloudflare. The end time is exclusive. You must follow
                         the ISO 8601 (RFC 3339) date format, in UTC timezone.
                         Example: 2020-12-31T12:35:00Z
-  --exclude EXCLUDE     Specify the list of fields to be excluded from
+  --exclude field1,field2
+                        Specify the list of fields to be excluded from
                         Logpull. Separate each field by comma without spaces.
   --available-fields    Display the list of available fields used by the
                         program. These fields are also included in the logpull
