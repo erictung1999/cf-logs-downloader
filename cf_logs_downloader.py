@@ -6,10 +6,10 @@ import requests, time, threading, os, json, logging, sys, argparse, logging.hand
 from datetime import datetime, timedelta
 from pathlib import Path
 from shutil import copy2
-from gzip import decompress
+from gzip import decompress, compress
 
 #specify version number of the program
-ver_num = "2.6.3"
+ver_num = "2.7.0"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -24,7 +24,7 @@ timestamp_format = "rfc3339"
 sample_rate = 1
 
 #initialize the variables to empty string, so the other parts of the program can access it
-zone_id = access_token = start_time = end_time = final_fields = log_dest = ""
+log_type = zone_id = account_id = api_token = start_time = end_time = fields = final_fields = log_dest = ""
 
 #the default value for the interval between each logpull process
 interval = 60
@@ -42,7 +42,8 @@ The following fields are available: BotScore,BotScoreSrc,CacheCacheStatus,CacheR
 
 Deprecated log fields: OriginResponseBytes,WAFFlags,WAFMatchedVar
 '''
-fields = ["BotScore","BotScoreSrc","CacheCacheStatus","CacheResponseBytes","CacheResponseStatus","CacheTieredFill","ClientASN","ClientCountry","ClientDeviceType","ClientIP","ClientIPClass","ClientRequestBytes","ClientRequestHost","ClientRequestMethod","ClientRequestPath","ClientRequestProtocol","ClientRequestReferer","ClientRequestURI","ClientRequestUserAgent","ClientSSLCipher","ClientSSLProtocol","ClientSrcPort","ClientXRequestedWith","EdgeColoCode","EdgeColoID","EdgeEndTimestamp","EdgePathingOp","EdgePathingSrc","EdgePathingStatus","EdgeRateLimitAction","EdgeRateLimitID","EdgeRequestHost","EdgeResponseBytes","EdgeResponseCompressionRatio","EdgeResponseContentType","EdgeResponseStatus","EdgeServerIP","EdgeStartTimestamp","FirewallMatchesActions","FirewallMatchesRuleIDs","FirewallMatchesSources","OriginIP","OriginResponseHTTPExpires","OriginResponseHTTPLastModified","OriginResponseStatus","OriginResponseTime","OriginSSLProtocol","ParentRayID","RayID","RequestHeaders","SecurityLevel","WAFAction","WAFProfile","WAFRuleID","WAFRuleMessage","WorkerCPUTime","WorkerStatus","WorkerSubrequest","WorkerSubrequestCount","ZoneID"]
+http_fields = ["BotScore","BotScoreSrc","CacheCacheStatus","CacheResponseBytes","CacheResponseStatus","CacheTieredFill","ClientASN","ClientCountry","ClientDeviceType","ClientIP","ClientIPClass","ClientRequestBytes","ClientRequestHost","ClientRequestMethod","ClientRequestPath","ClientRequestProtocol","ClientRequestReferer","ClientRequestURI","ClientRequestUserAgent","ClientSSLCipher","ClientSSLProtocol","ClientSrcPort","ClientXRequestedWith","EdgeColoCode","EdgeColoID","EdgeEndTimestamp","EdgePathingOp","EdgePathingSrc","EdgePathingStatus","EdgeRateLimitAction","EdgeRateLimitID","EdgeRequestHost","EdgeResponseBytes","EdgeResponseCompressionRatio","EdgeResponseContentType","EdgeResponseStatus","EdgeServerIP","EdgeStartTimestamp","FirewallMatchesActions","FirewallMatchesRuleIDs","FirewallMatchesSources","OriginIP","OriginResponseHTTPExpires","OriginResponseHTTPLastModified","OriginResponseStatus","OriginResponseTime","OriginSSLProtocol","ParentRayID","RayID","RequestHeaders","SecurityLevel","WAFAction","WAFProfile","WAFRuleID","WAFRuleMessage","WorkerCPUTime","WorkerStatus","WorkerSubrequest","WorkerSubrequestCount","ZoneID"]
+access_fields = ["action","allowed","app_domain","app_name","app_type","app_uid","connection","country","created_at","ip_address","purpose_justification_prompt","purpose_justification_response","ray_id","user_email","user_id"]
 
 #create three logging object for logging purposes
 logger = logging.getLogger("general_logger") #for general logging
@@ -91,9 +92,9 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global zone_id, access_token, sample_rate, interval, logger, start_time_static, end_time_static, one_time, fields, final_fields, yaml_schema, log_dest
+    global log_type, zone_id, account_id, api_token, sample_rate, interval, logger, start_time_static, end_time_static, one_time, fields, final_fields, yaml_schema, log_dest
     
-    welcome_msg = "A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage."
+    welcome_msg = "A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare and save it on local storage."
 
     parsed_config = {}
 
@@ -102,11 +103,13 @@ def initialize_arg():
     
     #specify which arguments are available to use in this program. The usage of the arguments will be printed when the user tells the program to display help message.
     parser.add_argument("-c", "--config", metavar="config.yml", help="Specify the path to the YAML configuration file.")
-    parser.add_argument("-z", "--zone", metavar="ZONE_ID", help="Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable.")
-    parser.add_argument("-t", "--token", help="Specify your Cloudflare Access Token, if CF_TOKEN environment variable not set. This will override CF_TOKEN variable.")
-    parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1.", type=float)
+    parser.add_argument("-a", "--account", metavar="ACCOUNT_ID", help="Specify the Cloudflare Account ID, if CF_ACCOUNT_ID environment variable not set. This will override CF_ACCOUNT_ID variable. Use only with 'access' log type.")
+    parser.add_argument("-z", "--zone", metavar="ZONE_ID", help="Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable. Use only with 'http' log type.")
+    parser.add_argument("-t", "--token", help="Specify your Cloudflare API Token, if CF_TOKEN environment variable not set. This will override CF_TOKEN variable.")
+    parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1. Only applicable for 'http' log type.", type=float)
     parser.add_argument("-i", "--interval", help="Specify the interval between each logpull in seconds. Default is 60 seconds.", type=int)
     parser.add_argument("-n", "--nice", help="Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.", type=int)
+    parser.add_argument("--type", help="Specify the type of logs that you would like to pull. Possible values: http (for HTTP logs), access (for Cloudflare Access logs)")
     parser.add_argument("--path", metavar="/log/path/", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/.")
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
@@ -114,8 +117,8 @@ def initialize_arg():
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
-    parser.add_argument("--exclude", metavar="field1,field2", help="Specify the list of fields to be excluded from Logpull. Separate each field by comma without spaces.")
-    parser.add_argument("--available-fields", help="Display the list of available fields used by the program. These fields are also included in the logpull by default (unless field exclusion is configured).", action="store_true")
+    parser.add_argument("--exclude", metavar="field1,field2", help="Specify the list of log fields to be excluded from Logpull. Separate each field by comma without spaces. Only applicable for 'http' log type.")
+    parser.add_argument("--available-fields", metavar="TYPE", help="Specify the log type to display the list of available log fields used by the program. These fields are also included in the logpull by default (unless field exclusion is configured). Possible values: http | access.")
     parser.add_argument("--install-service", help="Install the program as a systemd service. The service will execute the program from the path where you install the service.", action="store_true")
     parser.add_argument("--uninstall-service", help="Uninstall the systemd service.", action="store_true")
     parser.add_argument("--list-queue", help="List all the pending tasks in the queue which has failed before, without beautifying the result (raw JSON).", action="store_true")
@@ -164,9 +167,17 @@ def initialize_arg():
     if args.uninstall_service:
         uninstall_service()
 
+    #return the list of available fields by joining each field together as a string with ',' as delimiter
     if args.available_fields:
-        print(','.join(field for field in fields))
-        sys.exit(0)
+        if args.available_fields == 'http':
+            print(','.join(field for field in http_fields))
+            sys.exit(0)
+        elif args.available_fields == 'access':
+            print(','.join(field for field in access_fields))
+            sys.exit(0)
+        else:
+            logger.critical(str(datetime.now()) + " --- No log fields for log type '" + log_type + "'. Valid values: http | access")
+            sys.exit(2)
         
     #check if user specifies the path to configuration file, if yes, attempt read settings from the configuration file
     if args.config:
@@ -201,54 +212,95 @@ def initialize_arg():
     if args.debug is True or parsed_config.get("debug") is True:
         logger.setLevel(logging.DEBUG)
 
-    #check whether Zone ID is given by the user via the parameter. If not, check the environment variable.
+    #check whether the log type is specified by the user via the parameter. If not, check the environment variable.
     #if not in environment variable, then check the config file.
-    #priority of reading Zone ID: arguments - environment variable - config file.
-    #if no Zone ID is given, an error message will be given to the user and the program will exit
-    if args.zone:
-        zone_id = args.zone
-    elif os.getenv("CF_ZONE_ID"):
-        zone_id = os.getenv("CF_ZONE_ID")
-    elif parsed_config.get("cf_zone_id"):
-        zone_id = parsed_config.get("cf_zone_id")
+    #priority of reading log type: arguments - environment variable - config file.
+    #if no log type is specified, an error message will be given to the user and the program will exit
+    if args.type:
+        log_type = args.type
+    elif os.getenv("CF_LOG_TYPE"):
+        log_type = os.getenv("CF_LOG_TYPE")
+    elif parsed_config.get("type"):
+        log_type = parsed_config.get("type")
     else:
-        logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Zone ID.")
+        logger.critical(str(datetime.now()) + " --- Please specify the type of logs you want to pull. Possible values: http | access")
         sys.exit(2)
+
+    #check either zone ID or account ID based on the log type the user specified. HTTP logs only require zone ID, while Cloudflare Access logs only require account ID.
+    if log_type == "http":
+        #immediately assign the http fields list to a new variable, future reference of log fields will be the new variable
+        fields = http_fields
+        #check whether Zone ID is given by the user via the parameter. If not, check the environment variable.
+        #if not in environment variable, then check the config file.
+        #priority of reading Zone ID: arguments - environment variable - config file.
+        #if no Zone ID is given, an error message will be given to the user and the program will exit
+        if args.zone:
+            zone_id = args.zone
+        elif os.getenv("CF_ZONE_ID"):
+            zone_id = os.getenv("CF_ZONE_ID")
+        elif parsed_config.get("cf_zone_id"):
+            zone_id = parsed_config.get("cf_zone_id")
+        else:
+            logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Zone ID.")
+            sys.exit(2)
         
-    #check whether Cloudflare Access Token is given by the user via the parameter. If not, check the environment variable.
-    #if not in environment variable, then check the config file.
-    #priority of reading Cloudflare Access Token: arguments - environment variable - config file.
-    #if no Cloudflare Access Token is given, an error message will be given to the user and the program will exit
-    if args.token:
-        access_token = args.token
-    elif os.getenv("CF_TOKEN"):
-        access_token = os.getenv("CF_TOKEN")
-    elif parsed_config.get("cf_token"):
-        access_token = parsed_config.get("cf_token")
-    else:
-        logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Access Token.")
-        sys.exit(2)
-    
-    #check if user provides the sample rate value in command line as argument, if not, check the config file.
-    #if not exist in config file, use the default value.
-    #priority of reading : arguments - config file - default value (1).
-    if args.rate:
-        sample_rate = args.rate
-    elif parsed_config.get("rate"):
-        sample_rate = parsed_config.get("rate")
-    #check whether the sample rate is valid, if not return an error message and exit
-    try:
-        #the value should not more than two decimal places
-        if len(str(sample_rate).split(".", 1)[1]) > 2:
+        #check if user provides the sample rate value in command line as argument, if not, check the config file.
+        #if not exist in config file, use the default value.
+        #priority of reading : arguments - config file - default value (1).
+        if args.rate:
+            sample_rate = args.rate
+        elif parsed_config.get("rate"):
+            sample_rate = parsed_config.get("rate")
+        #check whether the sample rate is valid, if not return an error message and exit
+        try:
+            #the value should not more than two decimal places
+            if len(str(sample_rate).split(".", 1)[1]) > 2:
+                logger.critical(str(datetime.now()) + " --- Invalid sample rate specified. Please specify a value between 0.01 and 1, and only two decimal places allowed.")
+                sys.exit(2)
+        except IndexError:
+            #sometimes the user may specify 1 as the value, so we need to handle the exception for value with no decimal places
+            pass
+        if sample_rate <= 1.0 and sample_rate >= 0.01:
+            sample_rate = str(sample_rate)
+        else:
             logger.critical(str(datetime.now()) + " --- Invalid sample rate specified. Please specify a value between 0.01 and 1, and only two decimal places allowed.")
             sys.exit(2)
-    except IndexError:
-        #sometimes the user may specify 1 as the value, so we need to handle the exception for value with no decimal places
-        pass
-    if sample_rate <= 1.0 and sample_rate >= 0.01:
-        sample_rate = str(sample_rate)
+    elif log_type == "access":
+        #immediately assign the Access fields list to a new variable, future reference of log fields will be the new variable
+        fields = access_fields
+        #check whether Account ID is given by the user via the parameter. If not, check the environment variable.
+        #if not in environment variable, then check the config file.
+        #priority of reading Account ID: arguments - environment variable - config file.
+        #if no Account ID is given, an error message will be given to the user and the program will exit
+        if args.account:
+            account_id = args.account
+        elif os.getenv("CF_ACCOUNT_ID"):
+            account_id = os.getenv("CF_ACCOUNT_ID")
+        elif parsed_config.get("cf_account_id"):
+            account_id = parsed_config.get("cf_account_id")
+        else:
+            logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Account ID.")
+            sys.exit(2)
+
+        #display a warning to the user if the user specifies sample rate while using Cloudflare Access log type.
+        if args.rate or parsed_config.get("rate"):
+            logger.warning(str(datetime.now()) + " --- Cloudflare Access log does not support sampling. Sample rate will be ignored.")
     else:
-        logger.critical(str(datetime.now()) + " --- Invalid sample rate specified. Please specify a value between 0.01 and 1, and only two decimal places allowed.")
+        logger.critical(str(datetime.now()) + " --- Invalid log type '" + log_type + "'. Valid values: http | access")
+        sys.exit(2)
+        
+    #check whether Cloudflare API Token is given by the user via the parameter. If not, check the environment variable.
+    #if not in environment variable, then check the config file.
+    #priority of reading Cloudflare API Token: arguments - environment variable - config file.
+    #if no Cloudflare API Token is given, an error message will be given to the user and the program will exit
+    if args.token:
+        api_token = args.token
+    elif os.getenv("CF_TOKEN"):
+        api_token = os.getenv("CF_TOKEN")
+    elif parsed_config.get("cf_token"):
+        api_token = parsed_config.get("cf_token")
+    else:
+        logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare API Token.")
         sys.exit(2)
     
     #if the user wants to do one-time operation, check the correctness of the start time and end time of the logs to pull.
@@ -262,9 +314,14 @@ def initialize_arg():
                 if diff_start_end.total_seconds() < 1:
                     logger.critical(str(datetime.now()) + " --- Start time must be earlier than the end time by at least 1 second. ")
                     sys.exit(2)
-                if diff_to_now.total_seconds() < 60:
-                    logger.critical(str(datetime.now()) + " --- Please specify an end time that is 60 seconds or more earlier than the current time.")
-                    sys.exit(2)
+                if log_type == "http":
+                    if diff_to_now.total_seconds() < 60:
+                        logger.critical(str(datetime.now()) + " --- Please specify an end time that is 60 seconds or more earlier than the current time.")
+                        sys.exit(2)
+                elif log_type == "access":
+                    if diff_to_now.total_seconds() < 1:
+                        logger.critical(str(datetime.now()) + " --- Please specify an end time that is 1 second or more earlier than the current time.")
+                        sys.exit(2)
             except ValueError:
                 logger.critical(str(datetime.now()) + " --- Invalid date format specified. Make sure it is in RFC 3339 date format, in UTC timezone. Please refer to the example: 2020-12-31T12:34:56Z")
                 sys.exit(2)
@@ -321,16 +378,21 @@ def initialize_arg():
         log_dest[i]['no_organize'] = True if args.no_organize is True else log_dest[i].get('no_organize')
         log_dest[i]['no_gzip'] = True if args.no_gzip is True else log_dest[i].get('no_gzip')
     
-    #exclude certain fields in logpush
-    if args.exclude:
-        list_exclude_field = "".join(args.exclude.split()) #remove all whitespaces
-        list_exclude_field = list_exclude_field.split(',') #
-        for exclude_field in list_exclude_field:
-            fields.remove(exclude_field)
-    elif parsed_config.get('fields.exclude'):
-        for exclude_field in parsed_config.get('fields.exclude'):
-            fields.remove(exclude_field)
-    final_fields = ','.join(field for field in fields)
+    #only perform field exclusion on HTTP log type
+    if log_type == "http":
+        #exclude certain fields in logpull
+        if args.exclude:
+            list_exclude_field = "".join(args.exclude.split()) #remove all whitespaces
+            list_exclude_field = list_exclude_field.split(',') #
+            for exclude_field in list_exclude_field:
+                fields.remove(exclude_field)
+        elif parsed_config.get('fields.exclude'):
+            for exclude_field in parsed_config.get('fields.exclude'):
+                fields.remove(exclude_field)
+        final_fields = ','.join(field for field in fields)
+    elif log_type == "access":
+        if args.exclude or parsed_config.get('fields.exclude'):
+            logger.warning(str(datetime.now()) + " --- Cloudflare Access log does not support exclusion of log fields. All fields will be included in the log. Field exclusion will be ignored. Specify '--available-fields access' parameter to view the list of Cloudflare Access log fields.")
 
 '''
 This method is to retrieve the YAML schema from the schema file (schema.yml), and return the value of the schema to the caller.
@@ -360,7 +422,7 @@ This method will install the tool as a systemd service.
 def install_service(config_path):
     service_desc = '''\
         [Unit]
-        Description=A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage.
+        Description=A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare and save it on local storage.
         After=network.target
         StartLimitIntervalSec=0
 
@@ -425,36 +487,62 @@ def uninstall_service():
 
 '''
 This method will be invoked after initialize_arg().
-This method is to verify whether the Cloudflare Zone ID and Cloudflare Access Token given by the user is valid.
+This method is to verify whether the Cloudflare Zone ID/Account ID (depending on the log type) and Cloudflare API Token given by the user is valid.
 If it is not valid, an error message will be given to the user and the program will exit
 '''
 def verify_credential():
     
     global logger
-    
-    #specify the Cloudflare API URL to check the Zone ID and Access Token
-    url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received"
-    headers = {"Authorization": "Bearer " + access_token, "Content-Type": "application/json"}
-    
-    #make a HTTP request to the Cloudflare API
-    try:
-        r = requests.get(url, headers=headers)
-        r.encoding = "utf-8"
-    except Exception as e:
-        logger.critical(str(datetime.now()) + " --- Unable to perform API request to Cloudflare: " + str(e))
-        sys.exit(2)
-    
-    #if there's an error, Cloudflare API will return a JSON object to indicate the error
-    #and if it's not, a plain text will be returned instead
-    #the try except block is to catch any errors raised by json.loads(), in case Cloudflare is not returning JSON object
-    try:
-        response = json.loads(r.text)
-        if response["success"] is False:
-            logger.critical(str(datetime.now()) + " --- Failed to authenticate with Cloudflare API. Please check your Zone ID and Cloudflare Access Token.")
+
+    if log_type == "http":
+        #specify the Cloudflare API URL to check the Zone ID and API Token
+        url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received"
+        headers = {"Authorization": "Bearer " + api_token, "Content-Type": "application/json"}
+
+        #make a HTTP request to the Cloudflare API
+        try:
+            r = requests.get(url, headers=headers)
+            r.encoding = "utf-8"
+        except Exception as e:
+            logger.critical(str(datetime.now()) + " --- Unable to perform API request to Cloudflare: " + str(e))
             sys.exit(2)
-    except json.JSONDecodeError:
-        #a non-JSON object returned by Cloudflare indicates that authentication successful
-        pass
+        
+        #if there's an error, Cloudflare API will return a JSON object to indicate the error
+        #and if it's not, a plain text will be returned instead
+        #the try except block is to catch any errors raised by json.loads(), in case Cloudflare is not returning JSON object
+        try:
+            response = json.loads(r.text)
+            if response["success"] is False:
+                logger.critical(str(datetime.now()) + " --- Failed to authenticate with Cloudflare API. Please check your Zone ID and Cloudflare API Token.")
+                sys.exit(2)
+        except json.JSONDecodeError:
+            #a non-JSON object returned by Cloudflare indicates that authentication successful
+            pass
+    elif log_type == 'access':
+        #specify the Cloudflare API URL to check the Account ID and API Token
+        url = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/access/logs/access_requests"
+        headers = {"Authorization": "Bearer " + api_token, "Content-Type": "application/json"}
+        
+        #make a HTTP request to the Cloudflare API
+        try:
+            r = requests.get(url, headers=headers)
+            r.encoding = "utf-8"
+        except Exception as e:
+            logger.critical(str(datetime.now()) + " --- Unable to perform API request to Cloudflare: " + str(e))
+            sys.exit(2)
+        
+        #Cloudflare API should always return a JSON object to indicate whether the request is successful or not.
+        #the try except block is to catch any errors raised by json.loads(), in case Cloudflare is not returning JSON object
+        try:
+            response = json.loads(r.text)
+            if response["success"] is False:
+                logger.critical(str(datetime.now()) + " --- Failed to authenticate with Cloudflare API. Please check your Account ID and Cloudflare API Token.")
+                sys.exit(2)
+            else:
+                #no errors. Can proceed with logpull.
+                pass
+        except json.JSONDecodeError as e:
+            logger.critical(str(datetime.now()) + " --- Unable to perform API request to Cloudflare: " + str(e))
 
 '''
 This method is to initialize the folder with the date and time of the logs being stored on local storage as the name of the folder
@@ -525,15 +613,23 @@ def write_logs(logfile_path, data, no_gzip):
         if no_gzip is True:
             #open the temporary file as write mode if user specifies not to compress the logs. Save the logs from decoded text response.
             logfile = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=basename, dir=dirname)
-            #write the decompressed data
-            logfile.write(str(decompress(data).decode(encoding='utf-8')))
+            if log_type == "http":
+                #write the decompressed data
+                logfile.write(str(decompress(data).decode(encoding='utf-8')))
+            elif log_type == 'access':
+                #Cloudflare Access log does not compress by default. Can write to file directly.
+                logfile.write(data)
             #after writing logs to temporary file, create a hard link from actual file to the temporary file
             os.link(logfile.name, logfile_path)
         else:
             #open the temporary file as write binary mode to save the logs from raw gzipped response.
             logfile = tempfile.NamedTemporaryFile(mode="wb", prefix=basename, dir=dirname)
-            #write the compressed gzip data
-            logfile.write(data)
+            if log_type == "http":
+                #write the compressed gzip data
+                logfile.write(data)
+            elif log_type == 'access':
+                #Cloudflare Access log does not compress by default. Data compression needs to be applied first.
+                logfile.write(compress(data.encode()))
             #after writing logs to temporary file, create a hard link from actual file to the temporary file
             os.link(logfile.name, logfile_path)
         #close the temporary file and it will automatically deleted
@@ -615,7 +711,7 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     num_of_running_thread += 1
 
     #specify the number of attempts to retry in the event of error
-    #Note! Setting 0 will prevent retrying logpull tasks as defined in below code. The process will be replaced by queue_thread() instead.
+    #Note! Setting 0 prevents retrying logpull tasks as defined in below code. The process will be replaced by queue_thread() instead.
     retry_attempt = 0
     
     #a variable to check whether the request to Cloudflare API is successful.
@@ -668,19 +764,28 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     if not log_dest_per_thread_final:
         logger.warning(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logfile exists in all paths. Skipping.")
         return check_if_exited(), True
-    
-    #specify the URL for the Cloudflare API endpoint, with parameters such as Zone ID, the start time and end time of the logs to pull, timestamp format, sample rate and the fields to be included in the logs
-    url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received?start=" + log_start_time_rfc3339 + "&end=" + log_end_time_rfc3339 + "&timestamps="+ timestamp_format +"&sample=" + sample_rate + "&fields=" + final_fields
 
-    #specify headers for the content type and access token. Only accept gzip as response.
-    headers = {"Authorization": "Bearer " + access_token, "Content-Type": "application/json", "Accept-Encoding": "gzip", 'User-Agent': 'cf-logs-downloader (https://github.com/erictung1999/cf-logs-downloader)'}
-    
-    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting logs from Cloudflare...")
-    
+    if log_type == "http":
+        #specify the URL for the Cloudflare API endpoint, with parameters such as Zone ID, the start time and end time of the logs to pull, timestamp format, sample rate and the fields to be included in the logs
+        url = "https://api.cloudflare.com/client/v4/zones/" + zone_id + "/logs/received?start=" + log_start_time_rfc3339 + "&end=" + log_end_time_rfc3339 + "&timestamps="+ timestamp_format +"&sample=" + sample_rate + "&fields=" + final_fields
+
+        #specify headers for the content type and API token. Only accept gzip as response.
+        headers = {"Authorization": "Bearer " + api_token, "Content-Type": "application/json", "Accept-Encoding": "gzip", 'User-Agent': 'cf-logs-downloader (https://github.com/erictung1999/cf-logs-downloader)'}
+        
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting HTTP logs from Cloudflare...")
+    elif log_type == 'access':
+        #specify the URL for the Cloudflare API endpoint, with parameters such as Account ID and the start time and end time of the logs to pull
+        url = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/access/logs/access_requests?since=" + log_start_time_rfc3339 + "&until=" + log_end_time_rfc3339 + "&limit=1000"
+
+        #specify headers for the content type and API token. 
+        headers = {"Authorization": "Bearer " + api_token, "Content-Type": "application/json", 'User-Agent': 'cf-logs-downloader (https://github.com/erictung1999/cf-logs-downloader)'}
+        
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting Cloudflare Access logs from Cloudflare...")
+
     for i in range(retry_attempt+1):
         #make a GET request to the Cloudflare API
         try:
-            r = requests.get(url, headers=headers, stream=True)
+            r = requests.get(url, headers=headers, stream=True if log_type == "http" else False)
             r.encoding = 'utf-8'
         except Exception as e:
             logger.critical(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Unable to perform API request to Cloudflare: " + str(e) + ". " + (("Retrying " + str(i+1) + " of " + str(retry_attempt) + "...") if i < (retry_attempt) else ""))
@@ -730,18 +835,26 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     if request_success is False and one_time is False:
         #check if there's a need to add failed tasks to queue, if no, just add it to the log
         if skip_add_queue is True:
-            fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (Logpull error - HTTP " + str(status_code) + (", Cloudflare " + str(cf_status_code) + " - " + cf_err_msg if cf_status_code != 0 else "") + ")")
+            fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " [" + log_type + "] (Logpull error - HTTP " + str(status_code) + (", Cloudflare " + str(cf_status_code) + " - " + cf_err_msg if cf_status_code != 0 else "") + ")")
         else:
-            queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Logpull error (HTTP ' + str(status_code) + (", Cloudflare " + str(cf_status_code) + " - " + cf_err_msg if cf_status_code != 0 else "") + ')'})
+            queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'log_type': log_type, 'reason': 'Logpull error (HTTP ' + str(status_code) + (", Cloudflare " + str(cf_status_code) + " - " + cf_err_msg if cf_status_code != 0 else "") + ')'})
         return check_if_exited(), False
-
-    #Proceed to save the logs
-    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs requested. Saving logs...")
 
     i = 0
 
-    #get the raw response (gzipped content) and save it into a variable.
-    gzip_resp = r.raw.read()
+    if log_type == "http":
+        #get the raw response (gzipped content) and save it into a variable.
+        gzip_resp = r.raw.read()
+    elif log_type == 'access':
+        json_resp = r.json()
+        if (len(json_resp["result"]) <= 0):
+            logger.warning(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": No Access logs during this time range. Will not write file to local storage. Skipping...")
+            succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " [" + log_type + "] (No Access logs to write)")
+            return check_if_exited(), False
+        json_string_resp = [json.dumps(record) for record in json_resp["result"]]
+    
+    #Proceed to save the logs
+    logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs requested. Saving logs...")
 
     #iterate through list of objects - log destination configuration
     for each_log_dest in log_dest_per_thread_final:
@@ -749,21 +862,24 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
         logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Writing logs " + str(i) + " of " + str(len(log_dest_per_thread_final)) + " (" + each_log_dest.get('name') + ") to " + str(each_log_dest.get('path')) + " ...")
 
         #write logs to the destination as specified by the user, with the option for gzip
-        result, e = write_logs(each_log_dest.get('path'), gzip_resp, each_log_dest.get('no_gzip'))
+        if log_type == "http":
+            result, e = write_logs(each_log_dest.get('path'), gzip_resp, each_log_dest.get('no_gzip'))
+        elif log_type == "access":
+            result, e = write_logs(each_log_dest.get('path'), '\n'.join(json_string_resp), each_log_dest.get('no_gzip'))
         if result is True:
             #successful of write logs
             logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs " + ("without gzip compression" if each_log_dest.get('no_gzip') is True else "compressed with gzip") + " (" + each_log_dest.get('name') + ") saved as " + str(each_log_dest.get('path')) + ". ")
         else:
             #unsuccessful of write logs
             logger.error(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Failed to save logs to local storage (" + each_log_dest.get('name') + "): " + str(e))
-            #fail_logger.error("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + " - Write log error)")
             #add failed tasks to queue
             if one_time is False:
-                queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'reason': 'Write log error (' + each_log_dest.get('name') + ')'})
+                queue.put({'folder_time': current_time, 'log_start_time_utc': log_start_time_utc, 'log_end_time_utc': log_end_time_utc, 'log_type': log_type, 'reason': 'Write log error (' + each_log_dest.get('name') + ')'})
             return check_if_exited(), False
 
+    #only write success log if the operation is not one-time
     if one_time is False:
-        succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " (" + each_log_dest.get('name') + ")")
+        succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " [" + log_type + "] (" + each_log_dest.get('name') + ")")
 
     #invoke this method to check whether the user triggers program exit sequence
     return check_if_exited(), True
@@ -771,18 +887,18 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
         
 ####################################################################################################       
         
-        
+#register signals with a method. the method will be triggered if the user sends a signal to the program (SIGINT and SIGTERM)        
 signal.signal(signal.SIGINT, graceful_terminate)
 signal.signal(signal.SIGTERM, graceful_terminate)
 
 #This is where the real execution of the program begins. First it will initialize the parameters supplied by the user
 initialize_arg()
 
-#After the above execution, it will verify the Zone ID and Access Token given by the user whether they are valid
+#After the above execution, it will verify the Zone ID and API Token given by the user whether they are valid
 verify_credential()
 
-#if both Zone ID and Access Token are valid, the logpull tasks to Elastic will begin.
-logger.info(str(datetime.now()) + " --- Cloudflare ELS logs download tasks started.")
+#if both Zone ID and API Token are valid, the logpull tasks will begin.
+logger.info(str(datetime.now()) + " --- Cloudflare logs download tasks started. Log type: " + log_type)
 
 #if the user instructs the program to do logpull for only one time, the program will not do the logpull jobs repeatedly
 if one_time is True:
@@ -795,7 +911,12 @@ else:
     current_time = datetime.now()
 
     #calculate how many seconds to go back from current time to pull the logs. 
-    logs_from = 60.0 + ((interval // 60 * 60) + 60)
+    if log_type == "http":
+        #mininum 60 seconds difference to accommodate Cloudflare logs delay, and also add at least 60 seconds or more, based on interval
+        logs_from = 60.0 + (((interval-1) // 60 * 60) + 60)
+    elif log_type == "access":
+        #add at least 60 seconds or more, based on interval
+        logs_from = 0.0 + (((interval-1) // 60 * 60) + 60)
 
     #calculate the start time to pull the logs from Cloudflare API
     log_start_time_utc = current_time_utc.replace(second=0, microsecond=0) - timedelta(seconds=logs_from)

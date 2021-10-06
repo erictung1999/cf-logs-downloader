@@ -1,3 +1,5 @@
+optional type: str
+optional cf_account_id: str
 optional cf_zone_id: str
 optional cf_token: str
 optional rate: float
