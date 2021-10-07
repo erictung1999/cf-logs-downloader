@@ -9,7 +9,7 @@ from shutil import copy2
 from gzip import decompress, compress
 
 #specify version number of the program
-ver_num = "2.7.0"
+ver_num = "2.7.1"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -865,7 +865,7 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
         if log_type == "http":
             result, e = write_logs(each_log_dest.get('path'), gzip_resp, each_log_dest.get('no_gzip'))
         elif log_type == "access":
-            result, e = write_logs(each_log_dest.get('path'), '\n'.join(json_string_resp), each_log_dest.get('no_gzip'))
+            result, e = write_logs(each_log_dest.get('path'), '\n'.join(json_string_resp) + '\n', each_log_dest.get('no_gzip'))
         if result is True:
             #successful of write logs
             logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs " + ("without gzip compression" if each_log_dest.get('no_gzip') is True else "compressed with gzip") + " (" + each_log_dest.get('name') + ") saved as " + str(each_log_dest.get('path')) + ". ")
