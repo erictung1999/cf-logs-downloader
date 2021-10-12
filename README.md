@@ -1,3 +1,5 @@
+## Note: This README has not been updated since Version 2.6.3. Updates to this README will be coming in few days.
+
 # cf-logs-downloader
 A little tool to pull/download HTTP Access logs from Cloudflare Enterprise Log Share (ELS) and save it on local storage.
 
