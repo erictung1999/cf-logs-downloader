@@ -9,7 +9,7 @@ from shutil import copy2
 from gzip import decompress, compress
 
 #specify version number of the program
-ver_num = "2.7.1"
+ver_num = "2.7.2"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -850,7 +850,7 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
         if (len(json_resp["result"]) <= 0):
             logger.warning(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": No Access logs during this time range. Will not write file to local storage. Skipping...")
             succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " [" + log_type + "] (No Access logs to write)")
-            return check_if_exited(), False
+            return check_if_exited(), True
         json_string_resp = [json.dumps(record) for record in json_resp["result"]]
     
     #Proceed to save the logs
@@ -930,16 +930,24 @@ else:
     threading.Thread(target=queue_thread).start()
 
     #force the program to run indefinitely, unless the user stops it with Ctrl+C
-    while True:
-
+    while True:        
         #calculate the end time to pull the logs from Cloudflare API, based on the interval value given by the user
-        log_end_time_utc = log_start_time_utc + timedelta(seconds=interval)
+        if log_type == "http":
+            log_end_time_utc = log_start_time_utc + timedelta(seconds=interval)
+        elif log_type == 'access':
+            #as Cloudflare Access log request API does not automatically exclude 1 second from end time like what Cloudflare Logpull API does,
+            #we must manually subtract 1 second so that subsequent log requests will not overlap with the time
+            log_end_time_utc = log_start_time_utc + timedelta(seconds=interval-1)
 
         #create a new thread to handle the logs processing. the target method is logs() and 3 parameters are supplied to this method
         threading.Thread(target=logs_thread, args=(current_time, log_start_time_utc, log_end_time_utc)).start()
 
         #assigning start and end time to the next iteration
-        log_start_time_utc = log_end_time_utc
+        if log_type == "http":
+            log_start_time_utc = log_end_time_utc
+        elif log_type == 'access':
+            #adding 1 second back to the next iteration of start time, as previously 1 second deduction has been made
+            log_start_time_utc = log_end_time_utc + timedelta(seconds=1)
         current_time = current_time + timedelta(seconds=interval)
 
         time.sleep(interval - ((time.time() - initial_time) % interval))
