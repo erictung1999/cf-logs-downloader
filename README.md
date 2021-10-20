@@ -3,21 +3,22 @@ A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare an
 
 ## Prerequisites
 - For HTTP Logs:
-a. You must have an active Cloudflare Enterprise zone in order to use Cloudflare Enterprise Log Share (ELS).
-b. Make sure the zone that you want to pull logs from already has Log Retention enabled - refer to [this link](https://developers.cloudflare.com/logs/logpull-api/enabling-log-retention) on how to enable it.
-c. Make sure your Cloudflare user account has the permission to access Zone logs (particularly, Log Share Reader role). If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
+	* You must have an active Cloudflare Enterprise zone in order to use Cloudflare Enterprise Log Share (ELS).
+	* Make sure the zone that you want to pull logs from already has Log Retention enabled - refer to [this link](https://developers.cloudflare.com/logs/logpull-api/enabling-log-retention) on how to enable it.
+	* Make sure your Cloudflare user account has the permission to access Zone logs (particularly, Log Share Reader role). If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
 - For Cloudflare Access Logs:
-a. You must have an active Cloudflare for Teams subscription which includes Cloudflare Access.
-b. Make sure your Cloudflare user account has the permission to read Account - Access: Audit Logs. If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
+	* You must have an active Cloudflare for Teams subscription which includes Cloudflare Access.
+	* Make sure your Cloudflare user account has the permission to read Account - Access: Audit Logs. If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
+
 - You need to [create an API Token from the Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) to allow access to logs.
 - Requires root access to your local machine.
 - Currently only supports Linux. Windows isn't supported yet.
 
 ## Getting started
 1. Download the latest version of the binary file from the [GitHub Releases section](https://github.com/erictung1999/cf-logs-downloader/releases).
-3. Unzip the file. You should see 3 files: `cf_logs_downloader`, `schema.yml` and `sampleconfig.yml`.
-4. Make "cf_logs_downloader" executable - `chmod +x cf_logs_downloader`.
-5. Verify the script is working by executing `./cf_logs_downloader -v`. You should see this:
+2. Unzip the file. You should see 3 files: `cf_logs_downloader`, `schema.yml` and `sampleconfig.yml`.
+3. Make "cf_logs_downloader" executable - `chmod +x cf_logs_downloader`.
+4. Verify the script is working by executing `./cf_logs_downloader -v`. You should see this:
 
 	```
 	Version 2.7.2
