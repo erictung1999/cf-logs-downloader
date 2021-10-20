@@ -2,7 +2,7 @@
 type: http
 
 # specify your account ID here (remove it if your log type is not "access")
-cf_account_id: your_zone_id_here
+cf_account_id: your_account_id_here
 
 # specify your zone ID here (remove it if your log type is not "http")
 cf_zone_id: your_zone_id_here
