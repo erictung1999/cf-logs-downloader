@@ -4,7 +4,7 @@ A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare an
 ## Prerequisites
 - For HTTP Logs:
 	* You must have an active Cloudflare Enterprise zone in order to use Cloudflare Enterprise Log Share (ELS).
-	* Make sure the zone that you want to pull logs from already has Log Retention enabled - refer to [this link](https://developers.cloudflare.com/logs/logpull-api/enabling-log-retention) on how to enable it.
+	* Make sure the zone that you want to pull logs from already has Log Retention enabled - refer to [this link](https://developers.cloudflare.com/logs/logpull/enabling-log-retention) on how to enable it.
 	* Make sure your Cloudflare user account has the permission to access Zone logs (particularly, Log Share Reader role). If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
 - For Cloudflare Access Logs:
 	* You must have an active Cloudflare for Teams subscription which includes Cloudflare Access.
