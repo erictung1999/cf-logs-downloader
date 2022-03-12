@@ -7,7 +7,7 @@ A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare an
 	* Make sure the zone that you want to pull logs from already has Log Retention enabled - refer to [this link](https://developers.cloudflare.com/logs/logpull/enabling-log-retention) on how to enable it.
 	* Make sure your Cloudflare user account has the permission to access Zone logs (particularly, Log Share Reader role). If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
 - For Cloudflare Access Logs:
-	* You must have an active Cloudflare for Teams subscription which includes Cloudflare Access.
+	* You must have an active Cloudflare Zero Trust subscription (formerly known as Cloudflare for Teams) which includes Cloudflare Access.
 	* Make sure your Cloudflare user account has the permission to read Account - Access: Audit Logs. If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
 
 - You need to [create an API Token from the Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) to allow access to logs.
