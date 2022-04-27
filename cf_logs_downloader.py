@@ -9,7 +9,7 @@ from shutil import copy2
 from gzip import decompress, compress
 
 #specify version number of the program
-ver_num = "2.7.2"
+ver_num = "2.8.0"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -94,7 +94,7 @@ def initialize_arg():
     
     global log_type, zone_id, account_id, api_token, sample_rate, interval, logger, start_time_static, end_time_static, one_time, fields, final_fields, yaml_schema, log_dest
     
-    welcome_msg = "A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare and save it on local storage."
+    welcome_msg = "A little tool to pull/download HTTP, Cloudflare Access and Audit logs from Cloudflare and save it on local storage."
 
     parsed_config = {}
 
@@ -103,13 +103,13 @@ def initialize_arg():
     
     #specify which arguments are available to use in this program. The usage of the arguments will be printed when the user tells the program to display help message.
     parser.add_argument("-c", "--config", metavar="config.yml", help="Specify the path to the YAML configuration file.")
-    parser.add_argument("-a", "--account", metavar="ACCOUNT_ID", help="Specify the Cloudflare Account ID, if CF_ACCOUNT_ID environment variable not set. This will override CF_ACCOUNT_ID variable. Use only with 'access' log type.")
+    parser.add_argument("-a", "--account", metavar="ACCOUNT_ID", help="Specify the Cloudflare Account ID, if CF_ACCOUNT_ID environment variable not set. This will override CF_ACCOUNT_ID variable. Use only with 'access' or 'audit' log type.")
     parser.add_argument("-z", "--zone", metavar="ZONE_ID", help="Specify the Cloudflare Zone ID, if CF_ZONE_ID environment variable not set. This will override CF_ZONE_ID variable. Use only with 'http' log type.")
     parser.add_argument("-t", "--token", help="Specify your Cloudflare API Token, if CF_TOKEN environment variable not set. This will override CF_TOKEN variable.")
     parser.add_argument("-r", "--rate", help="Specify the log sampling rate from 0.01 to 1. Default is 1. Only applicable for 'http' log type.", type=float)
     parser.add_argument("-i", "--interval", help="Specify the interval between each logpull in seconds. Default is 60 seconds.", type=int)
     parser.add_argument("-n", "--nice", help="Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.", type=int)
-    parser.add_argument("--type", help="Specify the type of logs that you would like to pull. Possible values: http (for HTTP logs), access (for Cloudflare Access logs)")
+    parser.add_argument("--type", help="Specify the type of logs that you would like to pull. Possible values: http (for HTTP logs), access (for Cloudflare Access logs), audit (for Cloudflare Audit logs)")
     parser.add_argument("--path", metavar="/log/path/", help="Specify the path to store logs. By default, it will save to /var/log/cf_logs/.")
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
@@ -223,10 +223,10 @@ def initialize_arg():
     elif parsed_config.get("type"):
         log_type = parsed_config.get("type")
     else:
-        logger.critical(str(datetime.now()) + " --- Please specify the type of logs you want to pull. Possible values: http | access")
+        logger.critical(str(datetime.now()) + " --- Please specify the type of logs you want to pull. Possible values: http | access | audit")
         sys.exit(2)
 
-    #check either zone ID or account ID based on the log type the user specified. HTTP logs only require zone ID, while Cloudflare Access logs only require account ID.
+    #check either zone ID or account ID based on the log type the user specified. HTTP logs only require zone ID, while Cloudflare Access and Audit logs only require account ID.
     if log_type == "http":
         #immediately assign the http fields list to a new variable, future reference of log fields will be the new variable
         fields = http_fields
@@ -285,8 +285,26 @@ def initialize_arg():
         #display a warning to the user if the user specifies sample rate while using Cloudflare Access log type.
         if args.rate or parsed_config.get("rate"):
             logger.warning(str(datetime.now()) + " --- Cloudflare Access log does not support sampling. Sample rate will be ignored.")
+    elif log_type == "audit":
+        #check whether Account ID is given by the user via the parameter. If not, check the environment variable.
+        #if not in environment variable, then check the config file.
+        #priority of reading Account ID: arguments - environment variable - config file.
+        #if no Account ID is given, an error message will be given to the user and the program will exit
+        if args.account:
+            account_id = args.account
+        elif os.getenv("CF_ACCOUNT_ID"):
+            account_id = os.getenv("CF_ACCOUNT_ID")
+        elif parsed_config.get("cf_account_id"):
+            account_id = parsed_config.get("cf_account_id")
+        else:
+            logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Account ID.")
+            sys.exit(2)
+
+        #display a warning to the user if the user specifies sample rate while using Cloudflare Audit log type.
+        if args.rate or parsed_config.get("rate"):
+            logger.warning(str(datetime.now()) + " --- Cloudflare Audit log does not support sampling. Sample rate will be ignored.")
     else:
-        logger.critical(str(datetime.now()) + " --- Invalid log type '" + log_type + "'. Valid values: http | access")
+        logger.critical(str(datetime.now()) + " --- Invalid log type '" + log_type + "'. Valid values: http | access | audit")
         sys.exit(2)
         
     #check whether Cloudflare API Token is given by the user via the parameter. If not, check the environment variable.
@@ -318,7 +336,7 @@ def initialize_arg():
                     if diff_to_now.total_seconds() < 60:
                         logger.critical(str(datetime.now()) + " --- Please specify an end time that is 60 seconds or more earlier than the current time.")
                         sys.exit(2)
-                elif log_type == "access":
+                elif log_type == "access" or log_type == "audit" :
                     if diff_to_now.total_seconds() < 1:
                         logger.critical(str(datetime.now()) + " --- Please specify an end time that is 1 second or more earlier than the current time.")
                         sys.exit(2)
@@ -383,7 +401,7 @@ def initialize_arg():
         #exclude certain fields in logpull
         if args.exclude:
             list_exclude_field = "".join(args.exclude.split()) #remove all whitespaces
-            list_exclude_field = list_exclude_field.split(',') #
+            list_exclude_field = list_exclude_field.split(',') #each field will be separated by a comma, required by Cloudflare API logpull schema
             for exclude_field in list_exclude_field:
                 fields.remove(exclude_field)
         elif parsed_config.get('fields.exclude'):
@@ -393,6 +411,9 @@ def initialize_arg():
     elif log_type == "access":
         if args.exclude or parsed_config.get('fields.exclude'):
             logger.warning(str(datetime.now()) + " --- Cloudflare Access log does not support exclusion of log fields. All fields will be included in the log. Field exclusion will be ignored. Specify '--available-fields access' parameter to view the list of Cloudflare Access log fields.")
+    elif log_type == "audit":
+        if args.exclude or parsed_config.get('fields.exclude'):
+            logger.warning(str(datetime.now()) + " --- Cloudflare Audit log does not support exclusion of log fields. All fields will be included in the log. Field exclusion will be ignored.")
 
 '''
 This method is to retrieve the YAML schema from the schema file (schema.yml), and return the value of the schema to the caller.
@@ -422,7 +443,7 @@ This method will install the tool as a systemd service.
 def install_service(config_path):
     service_desc = '''\
         [Unit]
-        Description=A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare and save it on local storage.
+        Description=A little tool to pull/download HTTP, Cloudflare Access and Audit logs from Cloudflare and save it on local storage.
         After=network.target
         StartLimitIntervalSec=0
 
@@ -543,6 +564,31 @@ def verify_credential():
                 pass
         except json.JSONDecodeError as e:
             logger.critical(str(datetime.now()) + " --- Unable to perform API request to Cloudflare: " + str(e))
+    elif log_type == 'audit':
+        #specify the Cloudflare API URL to check the Account ID and API Token
+        url = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/audit_logs?per_page=1"
+        headers = {"Authorization": "Bearer " + api_token, "Content-Type": "application/json"}
+        
+        #make a HTTP request to the Cloudflare API
+        try:
+            r = requests.get(url, headers=headers)
+            r.encoding = "utf-8"
+        except Exception as e:
+            logger.critical(str(datetime.now()) + " --- Unable to perform API request to Cloudflare: " + str(e))
+            sys.exit(2)
+        
+        #Cloudflare API should always return a JSON object to indicate whether the request is successful or not.
+        #the try except block is to catch any errors raised by json.loads(), in case Cloudflare is not returning JSON object
+        try:
+            response = json.loads(r.text)
+            if response["success"] is False:
+                logger.critical(str(datetime.now()) + " --- Failed to authenticate with Cloudflare API. Please check your Account ID and Cloudflare API Token.")
+                sys.exit(2)
+            else:
+                #no errors. Can proceed with logpull.
+                pass
+        except json.JSONDecodeError as e:
+            logger.critical(str(datetime.now()) + " --- Unable to perform API request to Cloudflare: " + str(e))
 
 '''
 This method is to initialize the folder with the date and time of the logs being stored on local storage as the name of the folder
@@ -616,8 +662,8 @@ def write_logs(logfile_path, data, no_gzip):
             if log_type == "http":
                 #write the decompressed data
                 logfile.write(str(decompress(data).decode(encoding='utf-8')))
-            elif log_type == 'access':
-                #Cloudflare Access log does not compress by default. Can write to file directly.
+            elif log_type == 'access' or log_type == 'audit':
+                #Cloudflare Access and Audit log does not compress by default. Can write to file directly.
                 logfile.write(data)
             #after writing logs to temporary file, create a hard link from actual file to the temporary file
             os.link(logfile.name, logfile_path)
@@ -627,8 +673,8 @@ def write_logs(logfile_path, data, no_gzip):
             if log_type == "http":
                 #write the compressed gzip data
                 logfile.write(data)
-            elif log_type == 'access':
-                #Cloudflare Access log does not compress by default. Data compression needs to be applied first.
+            elif log_type == 'access' or log_type == 'audit':
+                #Cloudflare Access and Audit log does not compress by default. Data compression needs to be applied first.
                 logfile.write(compress(data.encode()))
             #after writing logs to temporary file, create a hard link from actual file to the temporary file
             os.link(logfile.name, logfile_path)
@@ -781,6 +827,14 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
         headers = {"Authorization": "Bearer " + api_token, "Content-Type": "application/json", 'User-Agent': 'cf-logs-downloader (https://github.com/erictung1999/cf-logs-downloader)'}
         
         logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting Cloudflare Access logs from Cloudflare...")
+    elif log_type == 'audit':
+        #specify the URL for the Cloudflare API endpoint, with parameters such as Account ID and the start time and end time of the logs to pull
+        url = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/audit_logs?since=" + log_start_time_rfc3339 + "&before=" + log_end_time_rfc3339 + "&limit=1000"
+
+        #specify headers for the content type and API token. 
+        headers = {"Authorization": "Bearer " + api_token, "Content-Type": "application/json", 'User-Agent': 'cf-logs-downloader (https://github.com/erictung1999/cf-logs-downloader)'}
+        
+        logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting Cloudflare Audit logs from Cloudflare...")
 
     for i in range(retry_attempt+1):
         #make a GET request to the Cloudflare API
@@ -852,6 +906,13 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
             succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " [" + log_type + "] (No Access logs to write)")
             return check_if_exited(), True
         json_string_resp = [json.dumps(record) for record in json_resp["result"]]
+    elif log_type == 'audit':
+        json_resp = r.json()
+        if (len(json_resp["result"]) <= 0):
+            logger.warning(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": No Audit logs during this time range. Will not write file to local storage. Skipping...")
+            succ_logger.info("Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + " [" + log_type + "] (No Audit logs to write)")
+            return check_if_exited(), True
+        json_string_resp = [json.dumps(record) for record in json_resp["result"]]
     
     #Proceed to save the logs
     logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Logs requested. Saving logs...")
@@ -864,7 +925,7 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
         #write logs to the destination as specified by the user, with the option for gzip
         if log_type == "http":
             result, e = write_logs(each_log_dest.get('path'), gzip_resp, each_log_dest.get('no_gzip'))
-        elif log_type == "access":
+        elif log_type == "access" or log_type == "audit":
             result, e = write_logs(each_log_dest.get('path'), '\n'.join(json_string_resp) + '\n', each_log_dest.get('no_gzip'))
         if result is True:
             #successful of write logs
@@ -914,7 +975,7 @@ else:
     if log_type == "http":
         #mininum 60 seconds difference to accommodate Cloudflare logs delay, and also add at least 60 seconds or more, based on interval
         logs_from = 60.0 + (((interval-1) // 60 * 60) + 60)
-    elif log_type == "access":
+    elif log_type == "access" or log_type == "audit":
         #add at least 60 seconds or more, based on interval
         logs_from = 0.0 + (((interval-1) // 60 * 60) + 60)
 
@@ -934,8 +995,8 @@ else:
         #calculate the end time to pull the logs from Cloudflare API, based on the interval value given by the user
         if log_type == "http":
             log_end_time_utc = log_start_time_utc + timedelta(seconds=interval)
-        elif log_type == 'access':
-            #as Cloudflare Access log request API does not automatically exclude 1 second from end time like what Cloudflare Logpull API does,
+        elif log_type == 'access' or log_type == "audit":
+            #as Cloudflare Access & Audit log request API does not automatically exclude 1 second from end time like what Cloudflare Logpull API does,
             #we must manually subtract 1 second so that subsequent log requests will not overlap with the time
             log_end_time_utc = log_start_time_utc + timedelta(seconds=interval-1)
 
@@ -945,7 +1006,7 @@ else:
         #assigning start and end time to the next iteration
         if log_type == "http":
             log_start_time_utc = log_end_time_utc
-        elif log_type == 'access':
+        elif log_type == 'access' or log_type == "audit":
             #adding 1 second back to the next iteration of start time, as previously 1 second deduction has been made
             log_start_time_utc = log_end_time_utc + timedelta(seconds=1)
         current_time = current_time + timedelta(seconds=interval)
