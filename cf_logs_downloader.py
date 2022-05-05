@@ -9,7 +9,7 @@ from shutil import copy2
 from gzip import decompress, compress
 
 #specify version number of the program
-ver_num = "2.8.0"
+ver_num = "2.8.1"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -30,7 +30,7 @@ log_type = zone_id = account_id = api_token = start_time = end_time = fields = f
 interval = 60
 
 #set the below settings to default: False
-one_time = False
+one_time = hide_user_logs = False
 
 #specify the path to install the systemd service
 service_path = '/etc/systemd/system/cf-logs-downloader.service'
@@ -92,7 +92,7 @@ If required parameters are not given by the user, an error message will be displ
 '''
 def initialize_arg():
     
-    global log_type, zone_id, account_id, api_token, sample_rate, interval, logger, start_time_static, end_time_static, one_time, fields, final_fields, yaml_schema, log_dest
+    global log_type, zone_id, account_id, api_token, sample_rate, interval, logger, start_time_static, end_time_static, one_time, fields, final_fields, yaml_schema, log_dest, hide_user_logs
     
     welcome_msg = "A little tool to pull/download HTTP, Cloudflare Access and Audit logs from Cloudflare and save it on local storage."
 
@@ -114,6 +114,7 @@ def initialize_arg():
     parser.add_argument("--prefix", help="Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.")
     parser.add_argument("--no-organize", help="Instruct the program to store raw logs as is, without organizing them into date and time folder.", action="store_true")
     parser.add_argument("--no-gzip", help="Do not compress the raw logs.", action="store_true")
+    parser.add_argument("--hide-user-logs", help="Enable this option if you prefer not to include user activity logs inside the audit logs, which includes user login histories, API-related events, etc. Only use this parameter with '--type audit'.", action="store_true")
     parser.add_argument("--one-time", help="Only pull logs from Cloudflare for one time, without scheduling capability. You must specify the start time and end time of the logs to be pulled from Cloudflare.", action="store_true")
     parser.add_argument("--start-time", help="Specify the start time of the logs to be pulled from Cloudflare. The start time is inclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:34:56Z")
     parser.add_argument("--end-time", help="Specify the end time of the logs to be pulled from Cloudflare. The end time is exclusive. You must follow the ISO 8601 (RFC 3339) date format, in UTC timezone. Example: 2020-12-31T12:35:00Z")
@@ -265,6 +266,11 @@ def initialize_arg():
         else:
             logger.critical(str(datetime.now()) + " --- Invalid sample rate specified. Please specify a value between 0.01 and 1, and only two decimal places allowed.")
             sys.exit(2)
+        
+        #display a warning to the user if the user specifies 'hide_user_logs' parameter while using Cloudflare HTTP log type.
+        if args.hide_user_logs or parsed_config.get("hide_user_logs"):
+            logger.warning(str(datetime.now()) + " --- 'hide_user_logs' parameter does not apply to Cloudflare Access logs. 'hide_user_logs' will be ignored.")
+
     elif log_type == "access":
         #immediately assign the Access fields list to a new variable, future reference of log fields will be the new variable
         fields = access_fields
@@ -282,9 +288,12 @@ def initialize_arg():
             logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Account ID.")
             sys.exit(2)
 
-        #display a warning to the user if the user specifies sample rate while using Cloudflare Access log type.
+        #display a warning to the user if the user specifies sample rate or 'hide_user_logs' parameter while using Cloudflare Access log type.
         if args.rate or parsed_config.get("rate"):
             logger.warning(str(datetime.now()) + " --- Cloudflare Access log does not support sampling. Sample rate will be ignored.")
+        if args.hide_user_logs or parsed_config.get("hide_user_logs"):
+            logger.warning(str(datetime.now()) + " --- 'hide_user_logs' parameter does not apply to Cloudflare Access logs. 'hide_user_logs' will be ignored.")
+
     elif log_type == "audit":
         #check whether Account ID is given by the user via the parameter. If not, check the environment variable.
         #if not in environment variable, then check the config file.
@@ -299,6 +308,14 @@ def initialize_arg():
         else:
             logger.critical(str(datetime.now()) + " --- Please specify your Cloudflare Account ID.")
             sys.exit(2)
+
+        #check if user specifies the 'hide_user_logs' parameter in the command line, if not, check the config file.
+        #if not exist in config file, use the default value.
+        #priority of reading : arguments - config file - default value (False).
+        if args.hide_user_logs:
+            hide_user_logs = args.hide_user_logs
+        elif parsed_config.get("hide_user_logs"):
+            hide_user_logs = parsed_config.get("hide_user_logs")
 
         #display a warning to the user if the user specifies sample rate while using Cloudflare Audit log type.
         if args.rate or parsed_config.get("rate"):
@@ -747,7 +764,7 @@ Based on the interval setting configured by the user, this method will only hand
 '''
 def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
     
-    global num_of_running_thread, logger, retry_attempt, final_fields, log_dest, queue, one_time
+    global num_of_running_thread, logger, retry_attempt, final_fields, log_dest, queue, one_time, hide_user_logs
 
     #a list to store list of objects - log destination configuration
     log_dest_per_thread = []
@@ -829,8 +846,11 @@ def logs_thread(current_time, log_start_time_utc, log_end_time_utc):
         logger.info(str(datetime.now()) + " --- Log range " + log_start_time_rfc3339 + " to " + log_end_time_rfc3339 + ": Requesting Cloudflare Access logs from Cloudflare...")
     elif log_type == 'audit':
         #specify the URL for the Cloudflare API endpoint, with parameters such as Account ID and the start time and end time of the logs to pull
-        url = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/audit_logs?since=" + log_start_time_rfc3339 + "&before=" + log_end_time_rfc3339 + "&limit=1000"
-
+        if hide_user_logs is True:
+            url = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/audit_logs?since=" + log_start_time_rfc3339 + "&before=" + log_end_time_rfc3339 + "&limit=1000&hide_user_logs=true"
+        else:
+            url = "https://api.cloudflare.com/client/v4/accounts/" + account_id + "/audit_logs?since=" + log_start_time_rfc3339 + "&before=" + log_end_time_rfc3339 + "&limit=1000&hide_user_logs=false"
+        
         #specify headers for the content type and API token. 
         headers = {"Authorization": "Bearer " + api_token, "Content-Type": "application/json", 'User-Agent': 'cf-logs-downloader (https://github.com/erictung1999/cf-logs-downloader)'}
         
