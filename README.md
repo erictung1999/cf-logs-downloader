@@ -1,5 +1,6 @@
+
 # cf-logs-downloader
-A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare and save it on local storage.
+A little tool to pull/download HTTP, Cloudflare Access and Audit logs from Cloudflare and save it on local storage.
 
 ## Prerequisites
 - For HTTP Logs:
@@ -9,6 +10,8 @@ A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare an
 - For Cloudflare Access Logs:
 	* You must have an active Cloudflare Zero Trust subscription (formerly known as Cloudflare for Teams) which includes Cloudflare Access.
 	* Make sure your Cloudflare user account has the permission to read Account - Access: Audit Logs. If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
+- For Cloudflare Audit Logs:
+	* Make sure your Cloudflare user account has the permission to read Account - Account Settings. If you are unsure about that, contact your Administrator. If you are an Administrator already, no further action is required.
 
 - You need to [create an API Token from the Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) to allow access to logs.
 - Requires root access to your local machine.
@@ -21,7 +24,7 @@ A little tool to pull/download HTTP or Cloudflare Access logs from Cloudflare an
 4. Verify the script is working by executing `./cf_logs_downloader -v`. You should see this:
 
 	```
-	Version 2.7.2
+	Version 2.8.0
 	```
 
 ## Create an API Token
@@ -49,6 +52,18 @@ Follow the instructions below to generate an API token for **Cloudflare Access L
 9. Click Continue to Summary, then click Create Token.
 10. Keep the generated token in a safe location. 
 
+Follow the instructions below to generate an API token for **Cloudflare Audit Logs**:
+1. Go to https://dash.cloudflare.com/profile/api-tokens (you need to login first, of course!)
+2. Click Create Token.
+3. Under Custom Token section, click Get Started.
+4. Give your API Token a name.
+5. Under Permissions, choose Account - Account Settings - Read.
+6. Under Account Resources, choose the specific account that you want to read the logs from. Allowing access to all accounts is not recommended.
+7. Under IP Address Filtering, enter the source IP address that will call the Cloudflare API (recommended).
+8. Provide a TTL to define how long this token can stay active (recommended).
+9. Click Continue to Summary, then click Create Token.
+10. Keep the generated token in a safe location. 
+
 ## Using the tool
 Here are the list of parameters that you can leverage within the tool:
 ```
@@ -58,8 +73,8 @@ Here are the list of parameters that you can leverage within the tool:
   -a ACCOUNT_ID, --account ACCOUNT_ID
                         Specify the Cloudflare Account ID, if CF_ACCOUNT_ID
                         environment variable not set. This will override
-                        CF_ACCOUNT_ID variable. Use only with 'access' log
-                        type.
+                        CF_ACCOUNT_ID variable. Use only with 'access' or
+                        'audit' log type.
   -z ZONE_ID, --zone ZONE_ID
                         Specify the Cloudflare Zone ID, if CF_ZONE_ID
                         environment variable not set. This will override
@@ -78,7 +93,8 @@ Here are the list of parameters that you can leverage within the tool:
                         -10.
   --type TYPE           Specify the type of logs that you would like to pull.
                         Possible values: http (for HTTP logs), access (for
-                        Cloudflare Access logs)
+                        Cloudflare Access logs), audit (for Cloudflare Audit
+                        logs)
   --path /log/path/     Specify the path to store logs. By default, it will
                         save to /var/log/cf_logs/.
   --prefix PREFIX       Specify the prefix name of the logfile being stored on
@@ -126,8 +142,8 @@ Here are the list of parameters that you can leverage within the tool:
 
 ## Configuration file format
 This tool supports specifying the settings via YAML configuration file. Refer to the list below for the supported settings:
-1. `type` (string, optional) - Specify the log type. Valid values: http | access
-2. `cf_account_id` (string, optional) - Specify the Cloudflare Account ID (when you specify "access" log type).
+1. `type` (string, optional) - Specify the log type. Valid values: http | access | audit
+2. `cf_account_id` (string, optional) - Specify the Cloudflare Account ID (when you specify "access" or "audit" log type).
 3. `cf_zone_id` (string, optional) - Specify the Cloudflare Zone ID (when you specify "http" log type). 
 4. `cf_token` (string, optional) - Specify the Cloudflare API Token.
 5. `rate` (float, optional) - Specify log sampling rate from 0.01 to 1. Default is 1. Only applicable for "http" log type.
@@ -187,7 +203,7 @@ Usually command line arguments will take the highest priority among the others. 
 
 
 ## Example usage
-1. At a bare minimum, you must specify the log type, Cloudflare Zone ID (for HTTP log type), Cloudflare Account ID (for Cloudflare Access log type) and API Token while using the tool. By doing so, this tool will use default values for the below configurations:
+1. At a bare minimum, you must specify the log type, Cloudflare Zone ID (for HTTP log type), Cloudflare Account ID (for Cloudflare Access / Audit log type) and API Token while using the tool. By doing so, this tool will use default values for the below configurations:
 
 	a. For HTTP log type: 
 	* Log sampling rate: 100% (represented by 1 in Cloudflare Logpull API)
@@ -199,7 +215,7 @@ Usually command line arguments will take the highest priority among the others. 
 	* Niceness: -10
 	* No debugging
 
-	b. For Cloudflare Access log type:
+	b. For Cloudflare Access / Audit log type:
 	* Logpull interval: 60 seconds
 	* Logpull storage path: `/var/log/cf_logs/`
 	* Log filename prefix: `cf_logs`
@@ -219,6 +235,11 @@ Usually command line arguments will take the highest priority among the others. 
 
 	```
 	$ sudo ./cf_logs_downloader.py --type access -a YOUR_ACCOUNT_ID -t YOUR_API_TOKEN
+	```
+	c. For Cloudflare Audit log type:
+		
+    ```
+	$ sudo ./cf_logs_downloader.py --type audit -a YOUR_ACCOUNT_ID -t YOUR_API_TOKEN
 	```
 	
 	Or, if you wish to use the environment variable to specify Cloudflare Zone ID and API Token, just export the environment variable with the value assigned to it (take HTTP log type as example):
@@ -336,10 +357,9 @@ Usually command line arguments will take the highest priority among the others. 
 	```
 3. Specifying `--queue-size` as the parameter will display the number of items inside the queue. Useful to know how many failed tasks pending for retry.
 4. If you specify any of the parameters as listed above, all other parameters that you specified (e.g. `-z` or `-t`) will be ignored.
-5. Currently it does not support separating queues based on Zone ID (domain). You may get unexpected behavior when you try to change the Zone ID while there are items in the queue, which is not bind to any Zone IDs.
 
 ## Known issues
-1. None
+1. Currently it does not support separating queues based on Zone ID (domain). You may get unexpected behavior when you try to change the Zone ID while there are items in the queue, which is not bind to any Zone IDs.
 
 ## Notes
 1. Currently only Cloudflare API Token can be used to authenticate against Cloudflare APIs. Global API key is not supported, as this is a more insecure option.
