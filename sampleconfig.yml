@@ -1,7 +1,7 @@
-# specify the log type here, valid values: http | access
+# specify the log type here, valid values: http | access | audit
 type: http
 
-# specify your account ID here (remove it if your log type is not "access")
+# specify your account ID here (remove it if your log type is not "access" or "audit")
 cf_account_id: your_account_id_here
 
 # specify your zone ID here (remove it if your log type is not "http")
