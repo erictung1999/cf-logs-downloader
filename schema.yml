@@ -1,4 +1,5 @@
 optional type: str
+optional hide_user_logs: bool
 optional cf_account_id: str
 optional cf_zone_id: str
 optional cf_token: str
