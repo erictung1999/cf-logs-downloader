@@ -1,4 +1,3 @@
-
 # cf-logs-downloader
 A little tool to pull/download HTTP, Cloudflare Access and Audit logs from Cloudflare and save it on local storage.
 
@@ -24,7 +23,7 @@ A little tool to pull/download HTTP, Cloudflare Access and Audit logs from Cloud
 4. Verify the script is working by executing `./cf_logs_downloader -v`. You should see this:
 
 	```
-	Version 2.8.0
+	Version 2.8.1
 	```
 
 ## Create an API Token
@@ -103,6 +102,10 @@ Here are the list of parameters that you can leverage within the tool:
   --no-organize         Instruct the program to store raw logs as is, without
                         organizing them into date and time folder.
   --no-gzip             Do not compress the raw logs.
+  --hide-user-logs      Enable this option if you prefer not to include user
+                        activity logs inside the audit logs, which includes
+                        user login histories, API-related events, etc. Only
+                        use this parameter with '--type audit'.
   --one-time            Only pull logs from Cloudflare for one time, without
                         scheduling capability. You must specify the start time
                         and end time of the logs to be pulled from Cloudflare.
@@ -143,14 +146,15 @@ Here are the list of parameters that you can leverage within the tool:
 ## Configuration file format
 This tool supports specifying the settings via YAML configuration file. Refer to the list below for the supported settings:
 1. `type` (string, optional) - Specify the log type. Valid values: http | access | audit
-2. `cf_account_id` (string, optional) - Specify the Cloudflare Account ID (when you specify "access" or "audit" log type).
-3. `cf_zone_id` (string, optional) - Specify the Cloudflare Zone ID (when you specify "http" log type). 
-4. `cf_token` (string, optional) - Specify the Cloudflare API Token.
-5. `rate` (float, optional) - Specify log sampling rate from 0.01 to 1. Default is 1. Only applicable for "http" log type.
-6. `interval` (int, optional) - Specify the interval between each logpull in seconds. Default is 60 seconds.
-7. `nice` (int, optional) - Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.
-8. `debug` (boolean, optional) -  Enable debugging functionality. Acceptable values: `true` or `false`.
-9. `log_dest` (list, optional) - Specify this to further configure the settings for the destination of the logs. This includes multiple options as shown below:
+2. `hide_user_logs` (boolean, optional) - Enable this option if you prefer not to include user activity logs (user login histories, API-related events, etc.) inside the audit logs. Only use this parameter with "audit" log type.
+3. `cf_account_id` (string, optional) - Specify the Cloudflare Account ID (when you specify "access" or "audit" log type).
+4. `cf_zone_id` (string, optional) - Specify the Cloudflare Zone ID (when you specify "http" log type). 
+5. `cf_token` (string, optional) - Specify the Cloudflare API Token.
+6. `rate` (float, optional) - Specify log sampling rate from 0.01 to 1. Default is 1. Only applicable for "http" log type.
+7. `interval` (int, optional) - Specify the interval between each logpull in seconds. Default is 60 seconds.
+8. `nice` (int, optional) - Specify the niceness of the logpull process from -20 (highest priority) to 19 (lowest priority). Default is -10.
+9. `debug` (boolean, optional) -  Enable debugging functionality. Acceptable values: `true` or `false`.
+10. `log_dest` (list, optional) - Specify this to further configure the settings for the destination of the logs. This includes multiple options as shown below:
 	*  `name` (string, required) - Give a unique name of the log destination configuration. Useful to identify in activity log.
 	* `path` (string, required) - Specify the path to store logs. By default, it will save to /var/log/cf_logs/
 	* `prefix` (string, required) - Specify the prefix name of the logfile being stored on local storage. By default, the file name will begins with cf_logs.
