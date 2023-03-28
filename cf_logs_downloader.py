@@ -9,7 +9,7 @@ from shutil import copy2
 from gzip import decompress, compress
 
 #specify version number of the program
-ver_num = "2.8.1"
+ver_num = "2.8.2"
 
 #a flag to determine whether the user wants to exit the program, so can handle the program exit gracefully
 is_exit = False
@@ -38,12 +38,13 @@ service_path = '/etc/systemd/system/cf-logs-downloader.service'
 '''
 Specify the fields for the logs
 
-The following fields are available: BotScore,BotScoreSrc,CacheCacheStatus,CacheResponseBytes,CacheResponseStatus,CacheTieredFill,ClientASN,ClientCountry,ClientDeviceType,ClientIP,ClientIPClass,ClientRequestBytes,ClientRequestHost,ClientRequestMethod,ClientRequestPath,ClientRequestProtocol,ClientRequestReferer,ClientRequestURI,ClientRequestUserAgent,ClientSSLCipher,ClientSSLProtocol,ClientSrcPort,ClientXRequestedWith,EdgeColoCode,EdgeColoID,EdgeEndTimestamp,EdgePathingOp,EdgePathingSrc,EdgePathingStatus,EdgeRateLimitAction,EdgeRateLimitID,EdgeRequestHost,EdgeResponseBytes,EdgeResponseCompressionRatio,EdgeResponseContentType,EdgeResponseStatus,EdgeServerIP,EdgeStartTimestamp,FirewallMatchesActions,FirewallMatchesRuleIDs,FirewallMatchesSources,OriginIP,OriginResponseHTTPExpires,OriginResponseHTTPLastModified,OriginResponseStatus,OriginResponseTime,OriginSSLProtocol,ParentRayID,RayID,RequestHeaders,SecurityLevel,WAFAction,WAFProfile,WAFRuleID,WAFRuleMessage,WorkerCPUTime,WorkerStatus,WorkerSubrequest,WorkerSubrequestCount,ZoneID
+The following fields are available for HTTP: BotScore,BotScoreSrc,CacheCacheStatus,CacheResponseBytes,CacheResponseStatus,CacheTieredFill,ClientASN,ClientCountry,ClientDeviceType,ClientIP,ClientIPClass,ClientRequestBytes,ClientRequestHost,ClientRequestMethod,ClientRequestPath,ClientRequestProtocol,ClientRequestReferer,ClientRequestURI,ClientRequestUserAgent,ClientSSLCipher,ClientSSLProtocol,ClientSrcPort,ClientXRequestedWith,EdgeColoCode,EdgeColoID,EdgeEndTimestamp,EdgePathingOp,EdgePathingSrc,EdgePathingStatus,EdgeRateLimitAction,EdgeRateLimitID,EdgeRequestHost,EdgeResponseBytes,EdgeResponseCompressionRatio,EdgeResponseContentType,EdgeResponseStatus,EdgeServerIP,EdgeStartTimestamp,FirewallMatchesActions,FirewallMatchesRuleIDs,FirewallMatchesSources,OriginIP,OriginResponseHTTPExpires,OriginResponseHTTPLastModified,OriginResponseStatus,OriginResponseTime,OriginSSLProtocol,ParentRayID,RayID,RequestHeaders,SecurityLevel,WAFAction,WAFProfile,WAFRuleID,WAFRuleMessage,WorkerCPUTime,WorkerStatus,WorkerSubrequest,WorkerSubrequestCount,ZoneID
+The following fields are available for Cloudflare Access: action,allowed,app_domain,app_name,app_type,app_uid,connection,country,created_at,ip_address,purpose_justification_prompt,purpose_justification_response,ray_id,temporary_access_approvers,temporary_access_duration,user_email,user_id
 
 Deprecated log fields: OriginResponseBytes,WAFFlags,WAFMatchedVar
 '''
 http_fields = ["BotScore","BotScoreSrc","CacheCacheStatus","CacheResponseBytes","CacheResponseStatus","CacheTieredFill","ClientASN","ClientCountry","ClientDeviceType","ClientIP","ClientIPClass","ClientRequestBytes","ClientRequestHost","ClientRequestMethod","ClientRequestPath","ClientRequestProtocol","ClientRequestReferer","ClientRequestURI","ClientRequestUserAgent","ClientSSLCipher","ClientSSLProtocol","ClientSrcPort","ClientXRequestedWith","EdgeColoCode","EdgeColoID","EdgeEndTimestamp","EdgePathingOp","EdgePathingSrc","EdgePathingStatus","EdgeRateLimitAction","EdgeRateLimitID","EdgeRequestHost","EdgeResponseBytes","EdgeResponseCompressionRatio","EdgeResponseContentType","EdgeResponseStatus","EdgeServerIP","EdgeStartTimestamp","FirewallMatchesActions","FirewallMatchesRuleIDs","FirewallMatchesSources","OriginIP","OriginResponseHTTPExpires","OriginResponseHTTPLastModified","OriginResponseStatus","OriginResponseTime","OriginSSLProtocol","ParentRayID","RayID","RequestHeaders","SecurityLevel","WAFAction","WAFProfile","WAFRuleID","WAFRuleMessage","WorkerCPUTime","WorkerStatus","WorkerSubrequest","WorkerSubrequestCount","ZoneID"]
-access_fields = ["action","allowed","app_domain","app_name","app_type","app_uid","connection","country","created_at","ip_address","purpose_justification_prompt","purpose_justification_response","ray_id","user_email","user_id"]
+access_fields = ["action","allowed","app_domain","app_name","app_type","app_uid","connection","country","created_at","ip_address","purpose_justification_prompt","purpose_justification_response","ray_id","temporary_access_approvers","temporary_access_duration","user_email","user_id"]
 
 #create three logging object for logging purposes
 logger = logging.getLogger("general_logger") #for general logging
