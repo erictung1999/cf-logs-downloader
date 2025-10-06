@@ -367,7 +367,7 @@ Usually command line arguments will take the highest priority among the others. 
 
 ## Notes
 1. Currently only Cloudflare API Token can be used to authenticate against Cloudflare APIs. Global API key is not supported, as this is a more insecure option.
-2. All the logpull activity logs will be written in `/var/log/cf_logs_downloader/` folder. Make sure you have the appropriate permission (root) to run the script.
+2. All the logpull activity logs will be written in `/var/log/cf_logs_downloader/` folder (can be adjusted by `SELF_LOGS_PATH` env variable). Make sure you have the appropriate permission (root) to run the script.
 3. Each successful logpull activity will be written in `succ.log` file.
 4. If a logpull task failed, the failed task will be put inside a queue. A separate thread will keep checking the queue for new items, and reattempt the logpull process. The thread will pick up new items after each logpull activity for every 3 seconds. If there's 3 consequtive failed logpull activities, then the thread will wait for 60 seconds before performing the next logpull activity. 
 5. Some logpull tasks can't be retried because of known error (for example, requesting bot management field from a zone which does not have bot management enabled). In this case, the failed logpull activity will be written in `fail.log`.
